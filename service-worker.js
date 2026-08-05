@@ -23,7 +23,7 @@
  * service worker runs outside the module graph and cannot import it.
  */
 
-const CACHE_VERSION = 'v1.1.0';
+const CACHE_VERSION = 'v1.2.0';
 const CACHE_NAME = `ironlog-${CACHE_VERSION}`;
 
 /**
@@ -40,6 +40,7 @@ const PRECACHE = [
   './css/layout.css',
   './css/components.css',
   './css/workout.css',
+  './css/charts.css',
 
   './js/app.js',
   './js/config.js',
@@ -49,6 +50,7 @@ const PRECACHE = [
   './js/core/router.js',
   './js/engine/progression.js',
   './js/engine/one-rep-max.js',
+  './js/engine/analytics.js',
   './js/services/storage-adapter.js',
   './js/services/db.js',
   './js/services/program-service.js',
@@ -58,9 +60,12 @@ const PRECACHE = [
   './js/services/session-service.js',
   './js/services/pr-service.js',
   './js/services/rest-timer.js',
+  './js/services/analytics-service.js',
   './js/pages/home.js',
   './js/pages/workout.js',
   './js/pages/history.js',
+  './js/charts/chart-loader.js',
+  './js/charts/chart-theme.js',
   './js/pages/progress.js',
   './js/pages/reports.js',
   './js/pages/settings.js',
@@ -73,6 +78,9 @@ const PRECACHE = [
   './components/set-row.js',
   './components/rest-bar.js',
   './components/sheet.js',
+  './components/chart-card.js',
+
+  './assets/vendor/chart.umd.js',
 
   './data/workouts.json',
 

@@ -4,6 +4,75 @@ All notable changes to Project IronLog. Follows [Semantic Versioning](https://se
 
 ---
 
+## [1.2.0] — 2026-08-05 — Session 3: Progress dashboard
+
+Charts, analytics and the personal-record badges.
+
+### Added
+
+**Charting foundation**
+- Chart.js 4.5.1 **vendored** into `assets/vendor/` with its licence, not
+  loaded from a CDN: a CDN script breaks offline, which is the one condition
+  the app is guaranteed to run in. Precached by the service worker.
+- Loaded lazily on the Progress route rather than at boot — it is ~208 KB and
+  Home, Workout and Settings never draw a chart.
+- `js/charts/chart-theme.js` reads chrome colours from the CSS custom
+  properties at runtime, so a token change moves the charts and light mode
+  needs no second definition.
+
+**Chart palette, validated rather than eyeballed**
+- An eight-slot categorical palette, assigned in fixed order and never cycled;
+  a ninth series logs a warning instead of generating a hue.
+- Validated against *this app's* surfaces in both modes: dark passes every gate
+  (worst adjacent CVD ΔE 8.4, normal-vision ΔE 19.3, all slots ≥ 3:1); light
+  passes with three slots below 3:1 on white.
+- **That contrast warning is why every chart ships a table view.** It is the
+  documented relief, and it also means no value is reachable only by hovering —
+  which matters on a phone, where there is no hover.
+
+**Progress dashboard**
+- One filter row (range: 30d / 90d / 1y / All, plus the strength exercise)
+  above everything it scopes, rather than filters inside individual cards.
+- Body weight: daily weigh-ins plus a 7-day rolling average, with the goal
+  weight as a reference line. The average is computed over full history before
+  windowing, so the leftmost visible point already has a full window behind it.
+- 7-day and 30-day averages and the lean bulk rate as supporting stats.
+- Strength per exercise: estimated 1RM and top-set load, both in kg on one
+  axis. Defaults to the most-logged compound.
+- Weekly volume and sets per week as bars from a zero baseline.
+- Volume by muscle group as an HTML bar list — fifteen groups need their full
+  names more than they need a canvas.
+- Workout consistency per week, with the in-flight week prorated against the
+  days scheduled so far.
+- Personal record badges, ranked by estimated 1RM, with a "New" pill on records
+  set in the last three weeks.
+- Body composition as **small multiples** — one card and one axis per metric.
+  Weight is in kilograms, body fat in percent, BMR in kilocalories; combining
+  them on one plot would need several y-axes whose alignment would be arbitrary.
+
+**Analytics engine** (`js/engine/analytics.js`)
+- Pure and tested: rolling averages, weekly and monthly bucketing, gap filling,
+  windowing, summary statistics and axis bounds.
+- Rolling averages window by **calendar days, not sample count** — weight is
+  logged most mornings but not all, and a 7-sample mean over gappy data
+  silently compares this week with a fortnight ago.
+- Line axes are not forced to zero; bar axes are. A zero baseline flattens a
+  real 3 kg move into a straight line, while a bar's length *is* its value.
+
+### Fixed
+
+- Series colours passed as design tokens rendered black on canvas: Chart.js
+  paints to a canvas, which cannot resolve `var(--token)`, so the invalid value
+  silently fell back to black — all but invisible on the dark surface. Tokens
+  are now resolved to real colours before they reach Chart.js.
+- `niceBounds` widened the padding but not the axis for a flat series, giving a
+  0.48 kg span that magnified scale noise into an apparent trend. Caught by a
+  test, not by looking at it.
+- The strength chart defaulted to whichever exercise sorted first
+  alphabetically; it now prefers the most-logged compound.
+
+---
+
 ## [1.1.0] — 2026-08-05 — Session 2: Workout engine
 
 Live set logging, the rest timer, workout history, and the progressive

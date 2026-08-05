@@ -44,11 +44,16 @@
     }
 
     // iPhone 15/16 logical width, iPad portrait, and a desktop column.
+    // ?h= raises the frame height, for capturing a long page (the Progress
+    // dashboard) in one screenshot instead of its own nested scroll.
+    const H = Number(params.get('h')) || 1180;
+    const only = params.get('only');   // e.g. ?only=402 to render one size
+
     const SIZES = [
-      { label: 'iPhone · 402',  width: 402,  height: 1180 },
-      { label: 'iPad · 834',    width: 834,  height: 1180 },
-      { label: 'Desktop · 1280', width: 1280, height: 1180 },
-    ];
+      { label: 'iPhone · 402',  width: 402,  height: H },
+      { label: 'iPad · 834',    width: 834,  height: H },
+      { label: 'Desktop · 1280', width: 1280, height: H },
+    ].filter((size) => !only || String(size.width) === only);
 
     function mountFrames() {
       for (const size of SIZES) {

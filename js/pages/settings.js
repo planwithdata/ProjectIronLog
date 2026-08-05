@@ -15,7 +15,7 @@ import * as db from '../services/db.js';
 import * as settingsService from '../services/settings-service.js';
 import { THEMES, UNITS } from '../services/settings-service.js';
 import * as programService from '../services/program-service.js';
-import { APP_VERSION } from '../config.js';
+import { APP_VERSION, BUILD_SESSION } from '../config.js';
 import { sectionHead } from '../../components/stat.js';
 
 const THEME_LABELS = { dark: 'Dark', light: 'Light', system: 'System' };
@@ -330,7 +330,7 @@ function aboutSection() {
   return el('section', {}, [
     sectionHead('About'),
     el('div.list', {}, [
-      infoRow('Version', `${APP_VERSION} · Session 1`),
+      infoRow('Version', `${APP_VERSION} · Session ${BUILD_SESSION}`),
       infoRow('Program', program.name),
       infoRow('Training days', String(programService.getTrainingDays().length)),
       infoRow('Storage', 'Local Storage on this device'),

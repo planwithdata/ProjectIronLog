@@ -27,6 +27,11 @@ import {
 
 import { estimate1rm, loadForReps } from '../js/engine/one-rep-max.js';
 
+import {
+  rollingAverage, trendPerWeek, byWeek, fillWeeks, withinDays,
+  summarise, niceBounds, weekStart, shiftDay, daysApart,
+} from '../js/engine/analytics.js';
+
 /* --- Fixtures ----------------------------------------------------------- */
 
 /** An exercise shaped like a workouts.json entry. */
@@ -322,4 +327,148 @@ test('estimate1rm is zero without a load or reps', () => {
 test('loadForReps inverts estimate1rm', () => {
   const oneRepMax = estimate1rm(100, 8);
   assert.equal(Math.round(loadForReps(oneRepMax, 8) * 100) / 100, 100);
+});
+
+/* --- Analytics: dates --------------------------------------------------- */
+
+test('weekStart returns the Monday of the containing week', () => {
+  // 2026-08-05 is a Wednesday.
+  assert.equal(weekStart('2026-08-05'), '2026-08-03');
+  assert.equal(weekStart('2026-08-03'), '2026-08-03', 'Monday maps to itself');
+  assert.equal(weekStart('2026-08-09'), '2026-08-03', 'Sunday belongs to the week that began Monday');
+});
+
+test('shiftDay and daysApart cross month and year boundaries', () => {
+  assert.equal(shiftDay('2026-08-31', 1), '2026-09-01');
+  assert.equal(shiftDay('2027-01-01', -1), '2026-12-31');
+  assert.equal(daysApart('2026-08-01', '2026-09-01'), 31);
+  assert.equal(daysApart('2026-09-01', '2026-08-01'), -31);
+});
+
+/* --- Analytics: rolling average ---------------------------------------- */
+
+test('rollingAverage windows by calendar days, not by sample count', () => {
+  // Two readings a week apart, then one the next day. A 7-day window must not
+  // include the reading from 8 days earlier.
+  const series = [
+    { date: '2026-08-01', value: 100 },
+    { date: '2026-08-09', value: 80 },
+    { date: '2026-08-10', value: 82 },
+  ];
+  const smoothed = rollingAverage(series, 7, 2);
+  assert.equal(smoothed.length, 1, 'only the last point has two readings inside 7 days');
+  assert.equal(smoothed[0].date, '2026-08-10');
+  assert.equal(smoothed[0].value, 81, 'mean of 80 and 82 — the 100 is out of window');
+});
+
+test('rollingAverage respects minSamples', () => {
+  const series = [{ date: '2026-08-01', value: 70 }];
+  assert.equal(rollingAverage(series, 7, 2).length, 0, 'one reading is not an average');
+  assert.equal(rollingAverage(series, 7, 1).length, 1);
+});
+
+test('rollingAverage smooths a noisy weight series', () => {
+  const series = [
+    { date: '2026-08-01', value: 76.0 },
+    { date: '2026-08-02', value: 77.0 },
+    { date: '2026-08-03', value: 76.5 },
+  ];
+  const smoothed = rollingAverage(series, 7, 2);
+  assert.equal(smoothed.length, 2);
+  assert.equal(smoothed[1].value, 76.5, 'mean of all three');
+  assert.equal(smoothed[1].count, 3);
+});
+
+/* --- Analytics: trend -------------------------------------------------- */
+
+test('trendPerWeek reports over the actual span, not an assumed week', () => {
+  const smoothed = [
+    { date: '2026-08-01', value: 76 },
+    { date: '2026-08-15', value: 77 },
+  ];
+  const trend = trendPerWeek(smoothed);
+  assert.equal(trend.days, 14);
+  assert.equal(trend.perWeek, 0.5, '1 kg over 14 days is 0.5 kg/week');
+});
+
+test('trendPerWeek needs two points', () => {
+  assert.equal(trendPerWeek([{ date: '2026-08-01', value: 76 }]), null);
+  assert.equal(trendPerWeek([]), null);
+});
+
+/* --- Analytics: bucketing --------------------------------------------- */
+
+test('byWeek groups into Monday-start weeks', () => {
+  const items = [
+    { date: '2026-08-04', v: 1 },   // Tue
+    { date: '2026-08-06', v: 2 },   // Thu
+    { date: '2026-08-11', v: 4 },   // next Tue
+  ];
+  const weeks = byWeek(items, (group) => group.reduce((s, i) => s + i.v, 0));
+  assert.equal(weeks.length, 2);
+  assert.equal(weeks[0].date, '2026-08-03');
+  assert.equal(weeks[0].value, 3);
+  assert.equal(weeks[1].date, '2026-08-10');
+  assert.equal(weeks[1].value, 4);
+});
+
+test('fillWeeks inserts missing weeks as zero rather than closing the gap', () => {
+  const weeks = [
+    { date: '2026-08-03', value: 100, count: 1, label: '3 Aug' },
+    { date: '2026-08-24', value: 120, count: 1, label: '24 Aug' },
+  ];
+  const filled = fillWeeks(weeks);
+  assert.equal(filled.length, 4, 'three weeks between, inclusive');
+  assert.deepEqual(filled.map((w) => w.value), [100, 0, 0, 120]);
+  assert.deepEqual(filled.map((w) => w.date),
+    ['2026-08-03', '2026-08-10', '2026-08-17', '2026-08-24']);
+});
+
+test('withinDays keeps an inclusive window ending at endKey', () => {
+  const series = [
+    { date: '2026-07-01', value: 1 },
+    { date: '2026-08-01', value: 2 },
+    { date: '2026-08-05', value: 3 },
+  ];
+  assert.deepEqual(withinDays(series, 30, '2026-08-05').map((p) => p.value), [2, 3]);
+  assert.deepEqual(withinDays(series, null, '2026-08-05').map((p) => p.value), [1, 2, 3]);
+});
+
+/* --- Analytics: summary and bounds ------------------------------------ */
+
+test('summarise reports the range and the change', () => {
+  const stats = summarise([
+    { date: '2026-08-01', value: 76 },
+    { date: '2026-08-02', value: 78 },
+    { date: '2026-08-03', value: 77 },
+  ]);
+  assert.equal(stats.min, 76);
+  assert.equal(stats.max, 78);
+  assert.equal(stats.first, 76);
+  assert.equal(stats.last, 77);
+  assert.equal(stats.change, 1);
+  assert.equal(stats.count, 3);
+});
+
+test('niceBounds does not force a line axis to zero', () => {
+  // A 2 kg move inside a 76-78 band must not be flattened by a zero baseline.
+  const bounds = niceBounds([
+    { date: '2026-08-01', value: 76 },
+    { date: '2026-08-02', value: 78 },
+  ]);
+  assert.ok(bounds.min > 70, `expected a tight lower bound, got ${bounds.min}`);
+  assert.ok(bounds.min < 76 && bounds.max > 78, 'bounds pad the data on both sides');
+});
+
+test('niceBounds widens a flat series to a usable span', () => {
+  const bounds = niceBounds([
+    { date: '2026-08-01', value: 76 },
+    { date: '2026-08-02', value: 76 },
+  ], { minSpan: 2 });
+  assert.ok(bounds.max - bounds.min >= 2, 'a flat line still gets a readable axis');
+});
+
+test('summarise and niceBounds tolerate an empty series', () => {
+  assert.equal(summarise([]), null);
+  assert.deepEqual(niceBounds([]), { min: 0, max: 1 });
 });

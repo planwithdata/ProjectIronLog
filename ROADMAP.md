@@ -43,16 +43,20 @@ own and is committed separately.
 - [x] Add or remove sets mid-workout
 - [x] Engine unit tests (28) and service integration tests (61)
 
-## Session 3 — Progress dashboard
+## Session 3 — Progress dashboard ✅ complete
 
-- [ ] Chart.js integration, themed from the design tokens
-- [ ] Body weight: daily entries, 7-day and 30-day averages, trend graph
-- [ ] Lean bulk rate readout
-- [ ] Body composition — all ten scale metrics, each with a graph
-- [ ] PR engine surfaced: badges for weight, reps, estimated 1RM, volume
-- [ ] Strength progress per exercise
-- [ ] Volume tracking by muscle group and by week
-- [ ] Workout consistency and streak history
+- [x] Chart.js vendored (not CDN), lazy-loaded, themed from the design tokens
+- [x] Categorical chart palette, validated against both app surfaces
+- [x] A table view on every chart (the contrast relief, and hover-free access)
+- [x] Body weight: daily entries, 7-day and 30-day averages, trend graph
+- [x] Goal weight as a reference line
+- [x] Lean bulk rate readout
+- [x] Body composition — all ten metrics as small multiples, one axis each
+- [x] PR badges for estimated 1RM, with a "New" marker
+- [x] Strength progress per exercise (estimated 1RM + top set)
+- [x] Volume tracking: weekly volume, sets per week, volume by muscle group
+- [x] Workout consistency per week
+- [x] Analytics engine, pure and tested (14 further assertions)
 
 ## Session 4 — Reports
 

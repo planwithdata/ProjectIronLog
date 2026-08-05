@@ -1,0 +1,357 @@
+/* ==========================================================================
+   charts.css — Session 3: the Progress dashboard.
+   Chart chrome only; every colour still comes from tokens.css.
+   ========================================================================== */
+
+/* --- Filter row --------------------------------------------------------
+   One row above everything it scopes. Filters inside a chart card read as
+   though they only affect that card, and two cards showing different windows
+   is how a dashboard starts lying.
+   ====================================================================== */
+
+.chart-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  align-items: center;
+}
+
+.chart-filter .segmented { flex: 1 1 240px; }
+
+.chart-filter__select {
+  flex: 1 1 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  /* Room for the native chevron on the trailing edge. */
+  padding-right: var(--s-6);
+  background-image: linear-gradient(45deg, transparent 50%, var(--c-text-3) 50%),
+                    linear-gradient(135deg, var(--c-text-3) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+@media (min-width: 560px) {
+  .chart-filter__select { flex: 1 1 220px; }
+}
+
+/* --- Chart card -------------------------------------------------------- */
+
+.chart-card {
+  background: var(--c-surface-1);
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-xl);
+  padding: var(--s-4);
+  box-shadow: var(--shadow-sm);
+}
+
+.chart-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.chart-card__title {
+  font-size: var(--t-callout);
+  font-weight: var(--w-semibold);
+  letter-spacing: var(--track-tight);
+}
+
+.chart-card__sub {
+  margin-top: 2px;
+  font-size: var(--t-caption);
+  color: var(--c-text-3);
+  line-height: var(--lh-snug);
+}
+
+/* Table toggle. Present on every chart: three light-mode series colours sit
+   below 3:1 on white, and a table is the documented relief. It also means no
+   value is hover-only, which matters on a phone where there is no hover. */
+.chart-card__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 0 var(--s-2);
+  border-radius: var(--r-sm);
+  background: var(--c-surface-3);
+  color: var(--c-text-2);
+  font-size: var(--t-caption);
+  font-weight: var(--w-medium);
+  transition: background-color var(--dur-fast) var(--ease-standard),
+              color var(--dur-fast) var(--ease-standard);
+}
+
+.chart-card__toggle svg {
+  width: 15px; height: 15px;
+  stroke: currentColor; stroke-width: 1.8; fill: none;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+.chart-card__toggle[aria-pressed="true"] {
+  background: var(--c-accent-dim);
+  color: var(--c-accent);
+}
+
+@media (hover: hover) {
+  .chart-card__toggle:hover { background: var(--c-surface-4); color: var(--c-text); }
+}
+
+/* --- Headline number ---------------------------------------------------- */
+
+.chart-card__headline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-1);
+  margin-top: var(--s-3);
+  flex-wrap: wrap;
+}
+
+.chart-card__value {
+  font-size: var(--t-title-1);
+  font-weight: var(--w-bold);
+  letter-spacing: var(--track-tight);
+  line-height: 1;
+  /* Proportional figures deliberately: tabular-nums makes a large standalone
+     number look loose. Tabular is for columns that align vertically. */
+}
+
+.chart-card__unit {
+  font-size: var(--t-subhead);
+  font-weight: var(--w-medium);
+  color: var(--c-text-2);
+}
+
+.chart-card__delta {
+  margin-left: var(--s-2);
+  font-size: var(--t-footnote);
+  font-weight: var(--w-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Legend ------------------------------------------------------------
+   Rendered in HTML rather than by Chart.js, so it inherits the app's type
+   tokens and wraps properly on a narrow phone.
+   ====================================================================== */
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-4);
+  margin-top: var(--s-3);
+}
+
+.chart-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.chart-legend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+
+/* The label wears text ink, never the series colour — the swatch beside it
+   carries identity, and coloured text at 12px fails contrast. */
+.chart-legend__label {
+  font-size: var(--t-caption);
+  color: var(--c-text-2);
+}
+
+/* --- Plot -------------------------------------------------------------- */
+
+.chart-card__plot {
+  position: relative;
+  margin-top: var(--s-3);
+  /* Height is set inline as plot + x-axis band, so axis labels are never
+     cropped into a nested scrollbar. */
+}
+
+.chart-card__plot canvas { display: block; }
+.chart-card__plot[hidden] { display: none; }
+
+/* --- Table view ------------------------------------------------------- */
+
+.chart-table {
+  margin-top: var(--s-3);
+  max-height: 320px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-md);
+}
+
+.chart-table[hidden] { display: none; }
+
+.chart-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-footnote);
+}
+
+.chart-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--s-2) var(--s-3);
+  text-align: right;
+  font-size: var(--t-caption);
+  font-weight: var(--w-semibold);
+  color: var(--c-text-2);
+  background: var(--c-surface-3);
+  white-space: nowrap;
+}
+
+.chart-table thead th:first-child { text-align: left; }
+
+.chart-table tbody th {
+  padding: var(--s-2) var(--s-3);
+  text-align: left;
+  font-weight: var(--w-medium);
+  color: var(--c-text-2);
+  white-space: nowrap;
+}
+
+.chart-table tbody td {
+  padding: var(--s-2) var(--s-3);
+  text-align: right;
+  color: var(--c-text);
+  white-space: nowrap;
+}
+
+.chart-table tbody tr + tr th,
+.chart-table tbody tr + tr td {
+  border-top: 1px solid var(--c-hairline);
+}
+
+/* --- Small multiples ---------------------------------------------------
+   Body composition: ten metrics in kg, %, kcal and an index. One plot would
+   need several y-axes, and their alignment would be arbitrary — so each metric
+   gets its own card and its own axis.
+   ====================================================================== */
+
+.small-multiples {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--s-3);
+}
+
+.small-multiples .chart-card { padding: var(--s-3); }
+.small-multiples .chart-card__value { font-size: var(--t-title-3); }
+
+/* --- Muscle group bars -------------------------------------------------
+   An HTML bar list rather than a canvas chart: with fifteen groups a canvas
+   needs a cramped label gutter, while rows give each its full name.
+   ====================================================================== */
+
+.muscle-bars {
+  display: grid;
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+}
+
+.muscle-bars__row {
+  display: grid;
+  grid-template-columns: minmax(72px, 96px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.muscle-bars__label {
+  font-size: var(--t-caption);
+  color: var(--c-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.muscle-bars__track {
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--c-track);
+  overflow: hidden;
+}
+
+.muscle-bars__fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  /* One hue for every row. The rows are already ordered by magnitude and the
+     bar length carries the value; a per-row hue would burn the only free
+     channel on information the chart already shows. */
+  background: var(--c-accent);
+}
+
+.muscle-bars__value {
+  font-size: var(--t-caption);
+  color: var(--c-text-2);
+  min-width: 4ch;
+  text-align: right;
+}
+
+/* --- PR badges -------------------------------------------------------- */
+
+.pr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--s-3);
+}
+
+.pr-badge {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s-3);
+  background: var(--c-surface-1);
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-lg);
+  min-width: 0;
+}
+
+/* A record set in the last three weeks gets the PR accent. The "New" pill
+   carries the same meaning in text, so the colour is never the only signal. */
+.pr-badge--fresh {
+  border-color: color-mix(in srgb, var(--c-pr) 40%, transparent);
+  background: linear-gradient(180deg, var(--c-pr-dim), transparent 60%), var(--c-surface-1);
+}
+
+.pr-badge__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  color: var(--c-pr);
+  margin-bottom: var(--s-1);
+}
+
+.pr-badge__top svg {
+  width: 15px; height: 15px;
+  stroke: currentColor; stroke-width: 1.8; fill: none;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+.pr-badge__name {
+  font-size: var(--t-footnote);
+  font-weight: var(--w-semibold);
+  color: var(--c-text);
+}
+
+.pr-badge__value {
+  font-size: var(--t-title-3);
+  font-weight: var(--w-bold);
+  letter-spacing: var(--track-tight);
+  line-height: 1.1;
+}
+
+.pr-badge__meta,
+.pr-badge__date {
+  font-size: var(--t-micro);
+  color: var(--c-text-3);
+}
+
+.pr-badge__date { margin-top: var(--s-1); }
