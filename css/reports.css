@@ -1,0 +1,236 @@
+/* ==========================================================================
+   reports.css — Session 4: reviews, notes, photos and logs.
+   ========================================================================== */
+
+/* --- Review ------------------------------------------------------------- */
+
+/* The recommendation is the point of the whole review, so it gets a tinted
+   panel and an accent rail rather than being another paragraph. */
+.review-reco {
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--r-lg);
+  background: var(--c-surface-3);
+  border-inline-start: 3px solid var(--c-text-3);
+}
+
+.review-reco--good  { border-inline-start-color: var(--c-success); background: var(--c-success-dim); }
+.review-reco--watch { border-inline-start-color: var(--c-warning); background: var(--c-warning-dim); }
+.review-reco--bad   { border-inline-start-color: var(--c-danger);  background: var(--c-danger-dim); }
+
+/* --- Findings ----------------------------------------------------------- */
+
+.finding {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: var(--s-3);
+  align-items: start;
+}
+
+/* A dot, not colour on the text: the label and figure stay in text ink so they
+   keep their contrast, and the dot carries the tone. */
+.finding__dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--c-text-3);
+}
+
+.finding__dot--good  { background: var(--c-success); }
+.finding__dot--watch { background: var(--c-warning); }
+.finding__dot--bad   { background: var(--c-danger); }
+
+.finding__value--good  { color: var(--c-success); }
+.finding__value--watch { color: var(--c-warning); }
+.finding__value--bad   { color: var(--c-danger); }
+.finding__value--neutral { color: var(--c-text-2); }
+
+/* --- Checkbox row ------------------------------------------------------- */
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: var(--touch);
+  padding: var(--s-1) 0;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.check-row input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  accent-color: var(--c-accent);
+  cursor: pointer;
+}
+
+/* --- Notes -------------------------------------------------------------- */
+
+.note--archived {
+  opacity: 0.6;
+  border-inline-start-color: var(--c-text-3);
+}
+
+/* --- Photo capture slots ------------------------------------------------ */
+
+.photo-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+
+.photo-slot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  width: 100%;
+  padding: 0;
+  background: none;
+  text-align: center;
+}
+
+/* 3:4 keeps a standing figure in frame without cropping legs off. */
+.photo-slot__img,
+.photo-slot__empty {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: var(--r-md);
+  object-fit: cover;
+  background: var(--c-surface-3);
+}
+
+.photo-slot__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--c-text-3);
+  border: 1px dashed var(--c-hairline-firm);
+}
+
+.photo-slot__empty svg {
+  stroke: currentColor; stroke-width: 1.6; fill: none;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+.photo-slot__label {
+  font-size: var(--t-micro);
+  color: var(--c-text-2);
+  line-height: var(--lh-snug);
+}
+
+.photo-slot:active .photo-slot__img,
+.photo-slot:active .photo-slot__empty { transform: scale(0.97); }
+
+/* --- Angle switcher ----------------------------------------------------- */
+
+/* Scrolls horizontally on a phone. Buttons rather than a swipe gesture so it
+   works with a mouse and a keyboard as well as a thumb. */
+.angle-row {
+  display: flex;
+  gap: var(--s-2);
+  overflow-x: auto;
+  margin: var(--s-3) calc(var(--s-4) * -1) 0;
+  padding: 0 var(--s-4);
+  scrollbar-width: none;
+}
+
+.angle-row::-webkit-scrollbar { display: none; }
+
+.angle-row__opt {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 var(--s-3);
+  border-radius: var(--r-pill);
+  background: var(--c-surface-3);
+  color: var(--c-text-2);
+  font-size: var(--t-footnote);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+
+.angle-row__opt[aria-pressed="true"] {
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+/* --- Compare ------------------------------------------------------------ */
+
+.compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+
+.compare__pane { margin: 0; min-width: 0; }
+
+.compare__img,
+.compare__missing {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: var(--r-md);
+  object-fit: cover;
+  background: var(--c-surface-3);
+}
+
+.compare__missing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-1);
+  color: var(--c-text-3);
+  border: 1px dashed var(--c-hairline-firm);
+}
+
+.compare__missing svg {
+  stroke: currentColor; stroke-width: 1.6; fill: none;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+.compare__caption {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-2);
+  margin-top: var(--s-1);
+}
+
+/* --- Photo strip -------------------------------------------------------- */
+
+.photo-strip {
+  display: flex;
+  gap: var(--s-2);
+  overflow-x: auto;
+  margin-top: var(--s-3);
+  padding-bottom: var(--s-1);
+  scrollbar-width: none;
+}
+
+.photo-strip::-webkit-scrollbar { display: none; }
+
+.photo-strip__cell {
+  flex: 0 0 auto;
+  width: 84px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: center;
+}
+
+.photo-strip__img {
+  width: 84px;
+  aspect-ratio: 3 / 4;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  background: var(--c-surface-3);
+}
+
+/* --- Wide screens ------------------------------------------------------- */
+
+@media (min-width: 768px) {
+  .compare { gap: var(--s-4); }
+  .photo-slots { grid-template-columns: repeat(5, 1fr); }
+}

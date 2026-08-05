@@ -4,7 +4,7 @@ A personal gym companion. Mobile-first Progressive Web App: installable on an
 iPhone Home Screen, works offline, stores everything on the device, and never
 talks to a server.
 
-**Version 1.2.0 — Sessions 1–3 of 5 complete.**
+**Version 1.3.0 — Sessions 1–4 of 5 complete.**
 
 ---
 
@@ -22,7 +22,9 @@ talks to a server.
 | Theme (dark / light / system), units (kg / lb) | Done |
 | PWA: manifest, icons, offline cache | Done |
 | Progress dashboard | Done — weight, composition, strength, volume, consistency, PRs |
-| Reports, photos, coach notes editor | Session 4 |
+| Reports — PDF, CSV, JSON | Done |
+| Progress photos, coach notes, recovery, measurements | Done |
+| Two-week review generator | Done — rule-based, traceable |
 | Polish, animation, a11y pass | Session 5 |
 
 ---
@@ -206,7 +208,7 @@ one place where a quiet mistake would corrupt years of training decisions.
 
 ```bash
 python tools/check.py          # parses every module, resolves every import
-node --test tools/test.mjs     # 42 assertions over the progression + analytics engines
+node --test tools/            # 62 assertions over the engines
 ```
 
 Open `tools/e2e.html` over HTTP for 61 integration assertions against real

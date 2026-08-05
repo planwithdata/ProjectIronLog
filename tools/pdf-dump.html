@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<!--
+  tools/pdf-dump.html — Emits a generated report as base64 so it can be
+  pulled out of a headless browser and inspected.
+
+  Headless Chrome cannot reliably be made to save a download, and a PDF that
+  passes byte-level assertions can still be visually broken — clipped text, a
+  heading orphaned at the foot of a page, a table running off the margin. This
+  makes the artefact retrievable so it can actually be looked at:
+
+    chrome --headless=new --virtual-time-budget=60000 \
+           --dump-dom http://127.0.0.1:PORT/tools/pdf-dump.html
+    # then base64-decode the contents of <pre id="b64">
+
+  Clears Local Storage on the origin it runs against — throwaway profile only.
+-->
+<html>
+<head><meta charset="utf-8"><title>pdf-dump</title></head>
+<body style="margin:0;font:11px monospace;word-break:break-all">
+<pre id="status">generating…</pre>
+<pre id="b64"></pre>
+
+<script type="module">
+  import * as db from '../js/services/db.js';
+  import * as programService from '../js/services/program-service.js';
+  import * as sessionService from '../js/services/session-service.js';
+  import * as bodyService from '../js/services/body-service.js';
+  import * as notesService from '../js/services/notes-service.js';
+  import * as reviewService from '../js/services/review-service.js';
+  import { recovery, measurements } from '../js/services/logs-service.js';
+  import { buildReport, DEFAULT_SECTIONS } from '../js/reports/pdf-report.js';
+
+  const status = document.getElementById('status');
+
+  try {
+    localStorage.clear();
+    await db.init();
+    await programService.load();
+
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
+
+    // Four weeks of Tuesday and Saturday work, progressing.
+    const plan = [
+      { day: 'tuesday-chest',  when: 25, w: 25 },
+      { day: 'saturday-upper', when: 22, w: 40 },
+      { day: 'tuesday-chest',  when: 18, w: 27.5 },
+      { day: 'saturday-upper', when: 15, w: 42.5 },
+      { day: 'tuesday-chest',  when: 11, w: 27.5 },
+      { day: 'saturday-upper', when: 8,  w: 45 },
+      { day: 'tuesday-chest',  when: 4,  w: 30 },
+      { day: 'saturday-upper', when: 1,  w: 47.5 },
+    ];
+
+    for (const step of plan) {
+      const session = await sessionService.startSession(step.day, daysAgo(step.when));
+      for (const entry of session.entries) {
+        const exercise = programService.getExercise(entry.exerciseId);
+        for (let i = 0; i < entry.sets.length; i += 1) {
+          await sessionService.updateSet(session.id, entry.exerciseId, i, {
+            weightKg: step.w,
+            reps: exercise.reps.min + (i === 0 ? 2 : 1),
+            completed: true,
+          });
+        }
+      }
+      await sessionService.completeSession(session.id);
+    }
+
+    for (let i = 26; i >= 0; i -= 1) {
+      await bodyService.logWeight(76 + (26 - i) * 0.035, daysAgo(i));
+    }
+    await bodyService.logComposition(
+      { weightKg: 76.9, bodyFatPercent: 14.6, muscleMassKg: 62.1, bmr: 1780, waterPercent: 58.2 },
+      daysAgo(14)
+    );
+    await bodyService.logComposition(
+      { weightKg: 77.4, bodyFatPercent: 14.4, muscleMassKg: 62.8, bmr: 1795, waterPercent: 58.6 },
+      daysAgo(1)
+    );
+
+    for (let i = 20; i >= 0; i -= 1) {
+      await recovery.log({ sleepHours: 7 + (i % 3) * 0.4, soreness: 2 + (i % 2), energy: 4 }, daysAgo(i));
+    }
+    await measurements.log({ chest: 103.5, waist: 82.5, leftArm: 36, rightArm: 36.2 }, daysAgo(15));
+    await measurements.log({ chest: 104.2, waist: 82.4, leftArm: 36.5, rightArm: 36.6 }, daysAgo(1));
+
+    await notesService.addNote({
+      text: 'Replace High-to-Low Fly with Low-to-High Fly for more upper chest.',
+      category: 'exercise', source: 'ChatGPT', pinned: true,
+    });
+    await notesService.addNote({ text: 'Bulk until 79 kg, then reassess.', category: 'nutrition' });
+    await notesService.addNote({ text: 'Increase lateral delt volume.', category: 'programming' });
+
+    const review = reviewService.generate(28);
+    const blob = await buildReport(review, {
+      sections: DEFAULT_SECTIONS.map((s) => s.key),
+      includePhotos: false,
+    });
+
+    const buffer = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < buffer.length; i += 1) binary += String.fromCharCode(buffer[i]);
+
+    document.getElementById('b64').textContent = btoa(binary);
+    status.textContent = `OK ${blob.size} bytes`;
+    document.title = 'OK';
+  } catch (error) {
+    status.textContent = `FAILED: ${error?.stack || error}`;
+    document.title = 'FAIL';
+  } finally {
+    localStorage.clear();
+  }
+</script>
+</body>
+</html>

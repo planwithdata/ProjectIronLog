@@ -58,19 +58,21 @@ own and is committed separately.
 - [x] Workout consistency per week
 - [x] Analytics engine, pure and tested (14 further assertions)
 
-## Session 4 — Reports
+## Session 4 — Reports ✅ complete
 
-- [ ] jsPDF report generator: cover, body metrics, weight trend, composition,
+- [x] jsPDF report generator: cover, body metrics, weight trend, composition,
       strength progress, completion, volume, overload summary, PRs, recovery,
       measurements, photos, coach notes, training summary
-- [ ] JSON export
-- [ ] CSV export
-- [ ] Progress photos — front, back, side, relaxed, flexed; every two weeks
-- [ ] Swipe comparison between photo dates
-- [ ] Coach notes editor with scoping to a day or exercise
-- [ ] Recovery logs — sleep, soreness, energy
-- [ ] Tape measurements
-- [ ] Two-week review generator with a rule-based training summary
+- [x] Selectable PDF sections
+- [x] JSON export
+- [x] CSV export — seven datasets, RFC 4180 escaped
+- [x] Progress photos — five angles, IndexedDB blob store, downscaled on import
+- [x] Swipe comparison between photo dates
+- [x] Coach notes editor with day/exercise scoping, pin and archive
+- [x] Recovery logs — sleep, soreness, energy, stress
+- [x] Tape measurements — eleven sites with change-vs-last
+- [x] Two-week review generator with a rule-based training summary
+- [x] Review engine tests (20) and a PDF integration test
 
 ## Session 5 — Polish
 

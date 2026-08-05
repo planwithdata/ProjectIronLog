@@ -232,6 +232,91 @@
     try { await db.importAll({ nope: true }); } catch { rejected = true; }
     ok('a non-IronLog file is rejected', rejected);
 
+    /* --- Recovery and measurements ------------------------------------- */
+    section('recovery and measurements');
+    const { recovery, measurements } = await import('../js/services/logs-service.js');
+
+    await recovery.log({ sleepHours: 7.5, soreness: 2, energy: 4 }, '2026-06-20');
+    await recovery.log({ sleepHours: 8, soreness: 2, energy: 4 }, '2026-06-21');
+    check('two recovery entries', recovery.count(), 2);
+    check('mean sleep', recovery.meanBetween('sleepHours', '2026-06-20', '2026-06-21'), 7.75);
+
+    // Out-of-range values are refused rather than stored.
+    let refusedBadValue = false;
+    try { await recovery.log({ sleepHours: 40 }, '2026-06-22'); } catch { refusedBadValue = true; }
+    ok('an impossible value is rejected', refusedBadValue);
+
+    await measurements.log({ chest: 104.5, waist: 82, leftArm: 36.5 }, '2026-06-20');
+    check('measurement stored', measurements.latest().chest, 104.5);
+    check('unknown fields are dropped', measurements.latest().nonsense, undefined);
+
+    /* --- Review engine, against real data ------------------------------ */
+    section('review');
+    const reviewService = await import('../js/services/review-service.js');
+    const review = reviewService.generate(28, '2026-06-23');
+
+    ok('review has findings', review.findings.length > 0, `(${review.findings.length})`);
+    ok('review has a recommendation', Boolean(review.recommendation?.action));
+    ok('period is correct', review.period.days === 28 && review.period.end === '2026-06-23');
+    ok('recovery reached the review',
+      review.input.recovery.entries === 2,
+      `(got ${review.input.recovery.entries})`);
+
+    const savedReview = await reviewService.save(review);
+    check('review saved', reviewService.getSaved().length, 1);
+    await reviewService.remove(savedReview.id);
+    check('review removed', reviewService.getSaved().length, 0);
+
+    /* --- CSV export ---------------------------------------------------- */
+    section('CSV export');
+    const csv = await import('../js/reports/csv.js');
+
+    const setsCsv = csv.setsCsv();
+    ok('sets CSV has a header and rows', setsCsv.split('\r\n').filter(Boolean).length > 1);
+    ok('sets CSV starts with a BOM', setsCsv.charCodeAt(0) === 0xFEFF);
+    ok('sets CSV names the exercise', setsCsv.includes('Incline Dumbbell Press'));
+
+    // RFC 4180 escaping: a comma or quote in free text must not break a row.
+    const notesService2 = await import('../js/services/notes-service.js');
+    await notesService2.addNote({ text: 'Contains, a comma and a "quote"' });
+    const notesCsvText = csv.notesCsv();
+    ok('a comma in a note is quoted', notesCsvText.includes('"Contains, a comma and a ""quote"""'));
+
+    ok('body CSV includes every composition field',
+      csv.bodyCsv().includes('bodyFatPercent'));
+    check('every dataset builds', csv.DATASETS.filter((d) => {
+      try { return typeof d.build() === 'string'; } catch { return false; }
+    }).length, csv.DATASETS.length);
+
+    /* --- PDF report ----------------------------------------------------- */
+    // The riskiest part of the reports layer: a vendored library, lazy-loaded,
+    // drawing a multi-page document. Worth proving it produces a real PDF.
+    section('PDF report');
+    const { buildReport, DEFAULT_SECTIONS } = await import('../js/reports/pdf-report.js');
+
+    const blob = await buildReport(review, {
+      sections: DEFAULT_SECTIONS.map((s) => s.key),
+      includePhotos: false,
+    });
+
+    ok('a blob came back', blob instanceof Blob);
+    check('MIME type', blob.type, 'application/pdf');
+    ok('the PDF is a plausible size', blob.size > 8000, `(${blob.size} bytes)`);
+
+    const header = new Uint8Array(await blob.slice(0, 5).arrayBuffer());
+    check('starts with the PDF magic number',
+      String.fromCharCode(...header), '%PDF-');
+
+    // Page count, read from the raw PDF: a one-page report would mean the
+    // section loop silently did nothing.
+    const text = await blob.text();
+    const pageCount = (text.match(/\/Type\s*\/Page[^s]/g) || []).length;
+    ok('more than one page', pageCount > 1, `(${pageCount} pages)`);
+
+    const single = await buildReport(review, { sections: ['summary'], includePhotos: false });
+    ok('a one-section report is smaller than the full one',
+      single.size < blob.size, `(${single.size} vs ${blob.size})`);
+
   } catch (error) {
     failed += 1;
     lines.push('', `THREW: ${error && error.stack ? error.stack : error}`);

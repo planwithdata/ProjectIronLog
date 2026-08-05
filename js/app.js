@@ -26,9 +26,15 @@ import { page as workoutPage } from './pages/workout.js';
 import { page as historyPage } from './pages/history.js';
 import { page as progressPage } from './pages/progress.js';
 import { page as reportsPage } from './pages/reports.js';
+import { page as notesPage } from './pages/notes.js';
+import { page as photosPage } from './pages/photos.js';
+import { page as logsPage } from './pages/logs.js';
 import { page as settingsPage } from './pages/settings.js';
 
-const PAGES = [homePage, workoutPage, historyPage, progressPage, reportsPage, settingsPage];
+const PAGES = [
+  homePage, workoutPage, historyPage, progressPage,
+  reportsPage, notesPage, photosPage, logsPage, settingsPage,
+];
 
 async function boot() {
   const root = $('#root');

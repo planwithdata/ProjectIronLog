@@ -23,7 +23,7 @@
  * service worker runs outside the module graph and cannot import it.
  */
 
-const CACHE_VERSION = 'v1.2.0';
+const CACHE_VERSION = 'v1.3.0';
 const CACHE_NAME = `ironlog-${CACHE_VERSION}`;
 
 /**
@@ -41,6 +41,7 @@ const PRECACHE = [
   './css/components.css',
   './css/workout.css',
   './css/charts.css',
+  './css/reports.css',
 
   './js/app.js',
   './js/config.js',
@@ -48,9 +49,11 @@ const PRECACHE = [
   './js/core/format.js',
   './js/core/events.js',
   './js/core/router.js',
+  './js/core/download.js',
   './js/engine/progression.js',
   './js/engine/one-rep-max.js',
   './js/engine/analytics.js',
+  './js/engine/review.js',
   './js/services/storage-adapter.js',
   './js/services/db.js',
   './js/services/program-service.js',
@@ -61,13 +64,23 @@ const PRECACHE = [
   './js/services/pr-service.js',
   './js/services/rest-timer.js',
   './js/services/analytics-service.js',
+  './js/services/logs-service.js',
+  './js/services/photo-store.js',
+  './js/services/review-service.js',
   './js/pages/home.js',
   './js/pages/workout.js',
   './js/pages/history.js',
   './js/charts/chart-loader.js',
   './js/charts/chart-theme.js',
+  './js/reports/pdf-loader.js',
+  './js/reports/pdf-report.js',
+  './js/reports/photo-embed.js',
+  './js/reports/csv.js',
   './js/pages/progress.js',
   './js/pages/reports.js',
+  './js/pages/notes.js',
+  './js/pages/photos.js',
+  './js/pages/logs.js',
   './js/pages/settings.js',
   './js/pages/_placeholder.js',
 
@@ -81,6 +94,7 @@ const PRECACHE = [
   './components/chart-card.js',
 
   './assets/vendor/chart.umd.js',
+  './assets/vendor/jspdf.umd.min.js',
 
   './data/workouts.json',
 

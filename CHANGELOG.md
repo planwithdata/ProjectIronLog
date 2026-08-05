@@ -4,6 +4,95 @@ All notable changes to Project IronLog. Follows [Semantic Versioning](https://se
 
 ---
 
+## [1.3.0] — 2026-08-05 — Session 4: Reports
+
+The coaching report, exports, progress photos, coach notes editor, recovery
+logs and tape measurements.
+
+### Added
+
+**Two-week review engine** (`js/engine/review.js`)
+- Pure and tested. Takes computed figures, returns findings and a
+  recommendation — each finding stating the figure it came from and the
+  threshold it was tested against, so "continue current calories" can be
+  traced rather than trusted.
+- The recommendation is an explicit priority ladder, and the *order* is the
+  policy: adherence below 70% outranks everything (nothing else is
+  diagnosable), then sleep below 6.5 h, then the goal weight being reached,
+  then the calorie rules.
+- Every threshold is declared in one `THRESHOLDS` object rather than scattered
+  through conditionals, with a test that asserts none has drifted back inline.
+
+**PDF report** (`js/reports/pdf-report.js`)
+- jsPDF 3.0.1 vendored with its licence and lazy-loaded, same reasoning as
+  Chart.js: it must work offline, and ~366 KB should not load for every route.
+- Built like print, not like a screenshot of the app: A4, light ground, ink
+  type, a reserved x-axis band, and a `reserve()` primitive that page-breaks
+  before a heading can be orphaned at the foot of a page.
+- Charts are drawn with jsPDF vector primitives rather than rasterised from
+  Chart.js — a canvas screenshot looks soft at print resolution and would bake
+  in the dark theme.
+- Thirteen sections: cover, training summary, body metrics, weight trend,
+  strength progress, workout completion, volume analysis, progressive overload,
+  personal records, recovery, measurements, progress photos and coach notes.
+  All selectable before export.
+
+**Progress photos**
+- Stored in **IndexedDB, not Local Storage** — the one thing that does not go
+  through the normal collection. Five angles a fortnight is ~130 photos a year;
+  base64 in a ~5 MB Local Storage quota fills up in about two months, and a
+  quota error on a photo write could take the whole database write with it.
+  Metadata stays in the normal collection, so a photo record is just a pointer.
+- Downscaled to 1280px JPEG at import, so the storage cost is paid once and
+  stays bounded, and re-encoded again to 640px for the PDF.
+- Compare view pins two dates side by side with an angle switcher — buttons
+  rather than a swipe gesture so it works with a mouse and a keyboard too.
+- Every object URL is revoked on teardown; a pinned blob per photo per visit
+  is how a phone tab gets killed.
+
+**Coach notes editor** (`js/pages/notes.js`)
+- Scoping to a training day or a specific exercise, so an exercise-scoped note
+  appears on that card mid-workout — the only moment it can usefully be read.
+- Pin, archive and delete. Archiving rather than deleting keeps a note
+  available to reports covering the period when it applied.
+
+**Recovery and measurements** (`js/services/logs-service.js`)
+- Sleep hours plus soreness, energy and stress on a 1–5 scale; eleven tape
+  measurement sites. Both built on one factory rather than two near-identical
+  CRUD modules.
+- Values outside a plausible range are refused rather than stored — a
+  fat-fingered 40-hour sleep would otherwise quietly wreck every average.
+- "Copy last" prefill, because retyping eleven sites is the fastest way to
+  stop logging.
+
+**CSV export** (`js/reports/csv.js`)
+- Seven datasets, one file each rather than one wide sheet.
+- RFC 4180 escaping, and a UTF-8 BOM so Excel on Windows reads accented
+  exercise names correctly.
+
+**Shared download helper** (`js/core/download.js`)
+- Extracted from Settings so the JSON backup, CSVs and the PDF share one
+  implementation — including the iOS revoke delay that all three need.
+
+### Fixed
+
+- The review reported the absolute body weight as the period's gain
+  ("+76.88 kg" on the report cover) when the starting average was missing:
+  `end - (start ?? 0)`. Missing endpoints now yield no change figure, falling
+  back to the rate. Regression test added.
+- The start-of-period weight average was anchored to a window *ending* on the
+  period's first day, so it needed a week of readings from before the review
+  began — the first fortnight of logging could never report a change. Both
+  windows now sit inside the period: its first week against its last.
+- Non-WinAnsi characters (`→`, `−`) rendered as garbage in the PDF *and* were
+  mis-measured, so `splitTextToSize` stopped wrapping and lines ran off the
+  right margin. Every string is now mapped to WinAnsi at a single patched entry
+  point, which keeps the app's on-screen typography unchanged.
+- Section headings could be left orphaned at the foot of a page with their
+  content starting overleaf.
+
+---
+
 ## [1.2.0] — 2026-08-05 — Session 3: Progress dashboard
 
 Charts, analytics and the personal-record badges.

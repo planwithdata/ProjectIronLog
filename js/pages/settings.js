@@ -10,7 +10,8 @@
 import { el, icon } from '../core/dom.js';
 import { refresh } from '../core/router.js';
 import { toast } from '../core/events.js';
-import { trimNumber } from '../core/format.js';
+
+import { download, stampedName, formatBytes } from '../core/download.js';
 import * as db from '../services/db.js';
 import * as settingsService from '../services/settings-service.js';
 import { THEMES, UNITS } from '../services/settings-service.js';
@@ -192,13 +193,7 @@ function fieldRow(label, unit, input) {
 
 function dataSection() {
   const usageNode = el('span.list__value', { text: '…' });
-  db.usageBytes().then((bytes) => {
-    usageNode.textContent = bytes < 1024
-      ? `${bytes} B`
-      : bytes < 1048576
-        ? `${trimNumber(bytes / 1024, 1)} KB`
-        : `${trimNumber(bytes / 1048576, 1)} MB`;
-  });
+  db.usageBytes().then((bytes) => { usageNode.textContent = formatBytes(bytes); });
 
   // A hidden file input, triggered by the visible Restore row — the native
   // control cannot be styled, and a bare "Choose file" button next to
@@ -263,19 +258,11 @@ function actionRow(iconName, title, sub, onClick) {
 /** Download the whole database as a timestamped JSON file. */
 function handleBackup() {
   try {
-    const snapshot = db.exportAll();
-    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const stamp = new Date().toISOString().slice(0, 10);
-
-    const anchor = el('a', { href: url, download: `ironlog-backup-${stamp}.json` });
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    // Revoking immediately can cancel the download on iOS Safari; a short
-    // delay lets the fetch for the blob start first.
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-
+    download(
+      JSON.stringify(db.exportAll(), null, 2),
+      stampedName('backup', 'json'),
+      'application/json'
+    );
     toast('Backup downloaded', 'success');
   } catch (error) {
     console.error('[settings] backup failed:', error);
