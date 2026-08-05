@@ -23,24 +23,25 @@ own and is committed separately.
 - [x] Static check tooling and a responsive preview harness
 - [x] Git initialised
 
-## Session 2 — Workout engine
+## Session 2 — Workout engine ✅ complete
 
-- [ ] Workout screen with live set logging
-- [ ] Exercise cards: target weight, last workout, target reps, rep range
-- [ ] Per-set entry: weight, reps, completed, optional RPE
-- [ ] Rest timer — per-exercise duration, auto-start, background-safe
-- [ ] Workout completion flow and summary
-- [ ] Workout history
-- [ ] Edit or delete a past session
-- [ ] **Progressive overload engine** — double progression as pure functions
-      over the session log:
-  - [ ] Recommend hold vs. advance from the previous session
-  - [ ] Per-set rep targets, not just a weight
-  - [ ] Handle `reps-first` bodyweight lifts
-  - [ ] Deload week set/load adjustment
-  - [ ] Stall detection at 3 sessions → drop ~10%
-  - [ ] Support dumbbell, barbell, machine, cable, smith and bodyweight
-- [ ] Resume a session Safari discarded mid-workout
+- [x] Workout screen with live set logging
+- [x] Exercise cards: target weight, last workout, target reps, rep range
+- [x] Per-set entry: weight, reps, completed, optional RPE
+- [x] Rest timer — per-exercise duration, auto-start, survives a screen lock
+- [x] Workout completion flow and summary sheet
+- [x] Workout history with per-session detail
+- [x] Edit or delete a past session (re-open, then change)
+- [x] **Progressive overload engine** — double progression as pure functions:
+  - [x] Recommend hold vs. advance from the previous session
+  - [x] Per-set rep targets, not just a weight
+  - [x] `reps-first` bodyweight lifts
+  - [x] Deload week set and load adjustment
+  - [x] Stall detection at 3 sessions → drop ~10%
+  - [x] Dumbbell, barbell, machine, cable, smith and bodyweight
+- [x] Resume a session Safari discarded mid-workout
+- [x] Add or remove sets mid-workout
+- [x] Engine unit tests (28) and service integration tests (61)
 
 ## Session 3 — Progress dashboard
 

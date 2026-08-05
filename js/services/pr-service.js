@@ -19,6 +19,9 @@
 
 import * as sessionService from './session-service.js';
 import * as programService from './program-service.js';
+import { estimate1rm } from '../engine/one-rep-max.js';
+
+export { estimate1rm };
 
 export const PR_KINDS = {
   WEIGHT: 'weight',
@@ -33,19 +36,6 @@ export const PR_LABELS = {
   [PR_KINDS.E1RM]:   'Estimated 1RM',
   [PR_KINDS.VOLUME]: 'Volume',
 };
-
-/**
- * Epley estimated one-rep max.
- *
- * Chosen over Brzycki because it stays sane at the 6–15 rep ranges this
- * program actually uses; Brzycki degrades badly past about 12 reps. Both are
- * estimates, so what matters is that one formula is used consistently.
- */
-export function estimate1rm(weightKg, reps) {
-  if (!weightKg || !reps || reps < 1) return 0;
-  if (reps === 1) return weightKg;
-  return weightKg * (1 + reps / 30);
-}
 
 /**
  * Best records for one exercise across all completed sessions.
@@ -144,8 +134,12 @@ export function getRecordFeed() {
 /**
  * The single most recent personal record.
  *
- * When several were set on the same day, prefer estimated 1RM — it is the
- * one that best captures "I got stronger", rather than "I did more sets".
+ * A session usually sets several records at once, so a plain "newest" pick
+ * would be whichever exercise happened to sort first — effectively random.
+ * Two tie-breaks make it deterministic and meaningful: prefer estimated 1RM,
+ * because it captures "I got stronger" rather than "I did more sets", and
+ * among those prefer the heaviest, so the headline record is the biggest lift
+ * of the day rather than an incidental one.
  */
 export function getLatestRecord() {
   const feed = getRecordFeed();
@@ -156,10 +150,23 @@ export function getLatestRecord() {
   const priority = [PR_KINDS.E1RM, PR_KINDS.WEIGHT, PR_KINDS.REPS, PR_KINDS.VOLUME];
 
   for (const kind of priority) {
-    const match = sameDay.find((entry) => entry.kind === kind);
-    if (match) return match;
+    const matches = sameDay
+      .filter((entry) => entry.kind === kind)
+      .sort((a, b) => b.value - a.value);
+    if (matches.length) return matches[0];
   }
   return sameDay[0];
+}
+
+/**
+ * Records that a specific session set.
+ *
+ * Because records are derived from the whole log rather than stored, this is
+ * simply the feed filtered by session — which means it stays correct if that
+ * session is later edited or deleted.
+ */
+export function getRecordsSetIn(sessionId) {
+  return getRecordFeed().filter((entry) => entry.sessionId === sessionId);
 }
 
 /** Records set within the last `days` days. */

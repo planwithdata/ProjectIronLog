@@ -7,7 +7,6 @@ import { comingSoon } from './_placeholder.js';
 
 export function render() {
   return el('div.page.enter', {}, [
-    el('h1.t-title-1', { text: 'Reports' }),
 
     comingSoon({
       session: 4,

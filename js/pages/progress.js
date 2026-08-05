@@ -20,7 +20,6 @@ export function render() {
   const readings = bodyService.getCompositionEntries().length;
 
   return el('div.page.enter', {}, [
-    el('h1.t-title-1', { text: 'Progress' }),
 
     comingSoon({
       session: 3,

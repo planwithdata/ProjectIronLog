@@ -36,6 +36,7 @@ export function render() {
     weekCard(dayKey),
     bodyStats(),
     latestPrCard(),
+    recentWorkouts(),
     coachNotesCard(),
   ]);
 
@@ -325,6 +326,46 @@ function latestPrCard() {
             text: 'Log your first session and IronLog will start tracking weight, rep, 1RM and volume records automatically.',
           }),
         ]),
+  ]);
+}
+
+/* --- Recent workouts --------------------------------------------------- */
+
+/**
+ * The last few sessions. Omitted entirely until there is history, rather than
+ * shown as an empty card — Home already carries two empty states on day one.
+ */
+function recentWorkouts() {
+  const sessions = sessionService.getCompletedSessions().slice(0, 3);
+  if (!sessions.length) return null;
+
+  const units = settingsService.getUnits();
+
+  return el('section', {}, [
+    sectionHead('Recent', { action: 'All', onAction: () => go('history') }),
+    el('div.list', {}, sessions.map((session) => {
+      const sessionDay = programService.getDayById(session.dayId);
+      const completion = sessionService.getSessionCompletion(session);
+      const volume = sessionService.getSessionVolume(session);
+
+      return el('button.list__row.list__row--tappable', {
+        type: 'button',
+        on: { click: () => go('history', { id: session.id }) },
+      }, [
+        el('div.list__icon', {}, [icon('dumbbell')]),
+        el('div.list__body', {}, [
+          el('div.list__title', { text: sessionDay?.label ?? session.dayId }),
+          el('div.list__sub', {
+            text: [
+              relativeDay(session.date),
+              `${completion.done}/${completion.total} sets`,
+              `${trimNumber(displayWeight(volume, units), 0)} ${units}`,
+            ].join(' · '),
+          }),
+        ]),
+        icon('chevron', { className: 'list__chevron' }),
+      ]);
+    })),
   ]);
 }
 

@@ -22,7 +22,6 @@ const THEME_LABELS = { dark: 'Dark', light: 'Light', system: 'System' };
 
 export function render() {
   return el('div.page.enter', {}, [
-    el('h1.t-title-1', { text: 'Settings' }),
     appearanceSection(),
     profileSection(),
     dataSection(),

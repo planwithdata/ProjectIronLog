@@ -23,7 +23,7 @@
  * service worker runs outside the module graph and cannot import it.
  */
 
-const CACHE_VERSION = 'v1.0.0';
+const CACHE_VERSION = 'v1.1.0';
 const CACHE_NAME = `ironlog-${CACHE_VERSION}`;
 
 /**
@@ -39,6 +39,7 @@ const PRECACHE = [
   './css/base.css',
   './css/layout.css',
   './css/components.css',
+  './css/workout.css',
 
   './js/app.js',
   './js/config.js',
@@ -46,6 +47,8 @@ const PRECACHE = [
   './js/core/format.js',
   './js/core/events.js',
   './js/core/router.js',
+  './js/engine/progression.js',
+  './js/engine/one-rep-max.js',
   './js/services/storage-adapter.js',
   './js/services/db.js',
   './js/services/program-service.js',
@@ -54,8 +57,10 @@ const PRECACHE = [
   './js/services/notes-service.js',
   './js/services/session-service.js',
   './js/services/pr-service.js',
+  './js/services/rest-timer.js',
   './js/pages/home.js',
   './js/pages/workout.js',
+  './js/pages/history.js',
   './js/pages/progress.js',
   './js/pages/reports.js',
   './js/pages/settings.js',
@@ -65,6 +70,9 @@ const PRECACHE = [
   './components/ring.js',
   './components/stat.js',
   './components/toast.js',
+  './components/set-row.js',
+  './components/rest-bar.js',
+  './components/sheet.js',
 
   './data/workouts.json',
 

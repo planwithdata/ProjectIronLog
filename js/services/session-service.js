@@ -31,6 +31,7 @@ import { EVENTS, emit } from '../core/events.js';
 import { today, isoWeekday, addDays, daysBetween } from '../core/format.js';
 import * as programService from './program-service.js';
 import * as settingsService from './settings-service.js';
+import { recommend, isEntryComplete, earnedAdvance } from '../engine/progression.js';
 
 /* --- Reads -------------------------------------------------------------- */
 
@@ -120,13 +121,7 @@ export async function startSession(dayId, dayKey = today()) {
     week: wave.week,
     waveWeek: wave.waveWeek,
     isDeload: wave.isDeload,
-    entries: day.exercises.map((exercise) => ({
-      exerciseId: exercise.id,
-      targetWeightKg: null,
-      targetReps: null,
-      sets: buildSetSlots(exercise, wave.isDeload),
-      notes: '',
-    })),
+    entries: day.exercises.map((exercise) => buildEntry(exercise, wave)),
   });
 
   emit(EVENTS.WORKOUT_STARTED, { sessionId: session.id, dayId });
@@ -134,17 +129,55 @@ export async function startSession(dayId, dayKey = today()) {
 }
 
 /**
- * Empty set slots for an exercise, honouring the deload set reduction so a
- * deload week does not show four rows the user is meant to skip.
+ * Build one exercise entry, with the engine's recommendation baked in.
+ *
+ * The prescription is frozen into the session at start rather than recomputed
+ * on each render, for two reasons: a report needs to say what was asked for as
+ * well as what was done, and the recommendation must not shift underneath the
+ * user as they log earlier sets of the same session.
  */
-function buildSetSlots(exercise, isDeload) {
-  const count = isDeload ? programService.deloadSets(exercise.sets) : exercise.sets;
-  return Array.from({ length: count }, () => ({
-    weightKg: null,
-    reps: null,
-    completed: false,
-    rpe: null,
-  }));
+function buildEntry(exercise, wave) {
+  const history = getExerciseHistory(exercise.id, 6);
+  const setCount = wave.isDeload
+    ? programService.deloadSets(exercise.sets)
+    : exercise.sets;
+
+  const plan = recommend(exercise, history, {
+    isDeload: wave.isDeload,
+    setCount,
+  });
+
+  return {
+    exerciseId: exercise.id,
+    targetWeightKg: plan.weightKg,
+    targetReps: plan.perSetReps,
+    plannedAction: plan.action,
+    planReason: plan.reason,
+    // Each slot is pre-filled with the recommended load and rep target so the
+    // common case is one tap on the checkmark, not four fields of typing.
+    sets: plan.perSetReps.map((reps) => ({
+      weightKg: plan.weightKg,
+      reps,
+      completed: false,
+      rpe: null,
+    })),
+    notes: '',
+  };
+}
+
+/**
+ * The engine's current recommendation for an exercise, ignoring any session
+ * in progress. Used by the read-only program browser and by reports.
+ */
+export function getRecommendation(exercise, dayKey = today()) {
+  const wave = programService.getTrainingWeek(dayKey);
+  const setCount = wave.isDeload
+    ? programService.deloadSets(exercise.sets)
+    : exercise.sets;
+  return recommend(exercise, getExerciseHistory(exercise.id, 6), {
+    isDeload: wave.isDeload,
+    setCount,
+  });
 }
 
 /** Patch one entry of an in-progress session. */
@@ -206,6 +239,112 @@ export async function abandonSession(sessionId) {
 
 export async function deleteSession(sessionId) {
   return db.removeById(COLLECTIONS.SESSIONS, sessionId);
+}
+
+/**
+ * Re-open a completed session for editing.
+ *
+ * Kept as an explicit action rather than allowing edits in place: a completed
+ * session is what the PR engine and the reports are computed from, so
+ * changing it should be a decision, not a slip of the thumb.
+ */
+export async function reopenSession(sessionId) {
+  const open = getActiveSession();
+  if (open && open.id !== sessionId) {
+    throw new Error('Finish or discard the workout in progress first.');
+  }
+  return db.replaceById(COLLECTIONS.SESSIONS, sessionId, {
+    status: 'in-progress',
+    completedAt: null,
+  });
+}
+
+/** Add an extra set to an entry — for the days where one more feels right. */
+export async function addSet(sessionId, exerciseId) {
+  const session = getSessionById(sessionId);
+  if (!session) throw new Error('That session no longer exists.');
+
+  const entries = session.entries.map((entry) => {
+    if (entry.exerciseId !== exerciseId) return entry;
+    const last = entry.sets[entry.sets.length - 1];
+    return {
+      ...entry,
+      sets: [...entry.sets, {
+        // Carry the last set's load forward; a new set is almost never a
+        // different weight, and an empty field is one more thing to type.
+        weightKg: last?.weightKg ?? entry.targetWeightKg ?? null,
+        reps: last?.reps ?? null,
+        completed: false,
+        rpe: null,
+      }],
+    };
+  });
+
+  return db.replaceById(COLLECTIONS.SESSIONS, sessionId, { entries });
+}
+
+/** Remove a set from an entry. The prescribed sets cannot all be removed. */
+export async function removeSet(sessionId, exerciseId, setIndex) {
+  const session = getSessionById(sessionId);
+  if (!session) throw new Error('That session no longer exists.');
+
+  const entries = session.entries.map((entry) => {
+    if (entry.exerciseId !== exerciseId) return entry;
+    if (entry.sets.length <= 1) return entry;
+    return { ...entry, sets: entry.sets.filter((_, index) => index !== setIndex) };
+  });
+
+  return db.replaceById(COLLECTIONS.SESSIONS, sessionId, { entries });
+}
+
+/**
+ * A summary of a finished session: what was done, what it earned, and which
+ * lifts now advance. This is what the completion sheet shows, and what the
+ * two-week review will quote.
+ */
+export function getSessionSummary(sessionId) {
+  const session = getSessionById(sessionId);
+  if (!session) return null;
+
+  const day = programService.getDayById(session.dayId);
+  const completion = getSessionCompletion(session);
+  const advancing = [];
+  const held = [];
+
+  for (const entry of session.entries) {
+    const exercise = programService.getExercise(entry.exerciseId);
+    if (!exercise) continue;
+
+    const done = entry.sets.filter((set) => set.completed);
+    if (!done.length) continue;
+
+    const record = {
+      exerciseId: entry.exerciseId,
+      name: exercise.name,
+      sets: done.length,
+      topWeightKg: Math.max(...done.map((set) => set.weightKg ?? 0)),
+      reps: done.map((set) => set.reps ?? 0),
+    };
+
+    if (earnedAdvance(exercise, entry.sets)) advancing.push(record);
+    else held.push(record);
+  }
+
+  return {
+    session,
+    dayLabel: day?.label ?? session.dayId,
+    completion,
+    volumeKg: getSessionVolume(session),
+    durationSeconds: session.durationSeconds,
+    exercisesDone: advancing.length + held.length,
+    advancing,
+    held,
+  };
+}
+
+/** Whether every entry in a session has all its sets ticked. */
+export function isSessionComplete(session) {
+  return session.entries.length > 0 && session.entries.every(isEntryComplete);
 }
 
 /* --- Derived statistics ------------------------------------------------- */

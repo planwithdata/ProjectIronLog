@@ -1,0 +1,443 @@
+/* ==========================================================================
+   workout.css — Session 2: set logging, rest timer, sheets.
+   Split out from components.css because these only load on the workout and
+   history routes' concerns and the file was getting long enough to be hard
+   to navigate.
+   ========================================================================== */
+
+/* --- Set row -----------------------------------------------------------
+   Grid rather than flex so the weight and rep columns stay aligned down the
+   whole card — misaligned numbers make a set list much harder to scan.
+   [index] [weight group] [reps group] [rpe?] [check]
+   ====================================================================== */
+
+/* Five columns: index, weight, reps, RPE, commit. The RPE column collapses to
+   zero width when the select is absent, so the same grid serves both cases. */
+.set-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) 0;
+  transition: opacity var(--dur-base) var(--ease-standard);
+}
+
+.set-row + .set-row { border-top: 1px solid var(--c-hairline); }
+
+/* A completed set recedes: it is done, and the eye should land on the next
+   one. Kept above the contrast floor rather than dimmed to unreadable. */
+.set-row--done .set-row__group { opacity: 0.55; }
+
+.set-row__index {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  color: var(--c-text-2);
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.set-row__target {
+  font-size: var(--t-micro);
+  color: var(--c-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Stepper: [−][ field ][+] */
+.set-row__group {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  align-items: stretch;
+  background: var(--c-surface-3);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  min-height: var(--touch);
+}
+
+.set-row__step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: var(--w-medium);
+  line-height: 1;
+  color: var(--c-text-2);
+  background: transparent;
+  transition: background-color var(--dur-fast) var(--ease-standard);
+}
+
+.set-row__step:active { background: var(--c-surface-4); color: var(--c-text); }
+
+@media (hover: hover) {
+  .set-row__step:hover { background: var(--c-surface-4); }
+}
+
+.set-row__field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 2px 0;
+}
+
+.set-row__input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  text-align: center;
+  background: transparent;
+  border: none;
+  color: var(--c-text);
+  /* 17px is the threshold below which iOS Safari zooms the viewport on focus.
+     Do not reduce this. */
+  font-size: var(--t-body);
+  font-weight: var(--w-semibold);
+  line-height: 1.1;
+}
+
+.set-row__input::placeholder { color: var(--c-text-3); }
+
+.set-row__unit {
+  font-size: var(--t-micro);
+  color: var(--c-text-3);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.set-row__rpe {
+  min-height: var(--touch);
+  padding: 0 var(--s-1);
+  background: var(--c-surface-3);
+  border-radius: var(--r-md);
+  color: var(--c-text-2);
+  font-size: var(--t-footnote);
+  text-align: center;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* The commit target: the biggest thing in the row. */
+.set-row__check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch);
+  height: var(--touch);
+  border-radius: var(--r-md);
+  background: var(--c-surface-3);
+  color: var(--c-text-3);
+  transition: background-color var(--dur-fast) var(--ease-standard),
+              color var(--dur-fast) var(--ease-standard),
+              transform var(--dur-fast) var(--ease-spring);
+}
+
+.set-row__check svg { stroke-width: 2.6; }
+.set-row__check:active { transform: scale(0.9); }
+
+.set-row__check[aria-pressed="true"] {
+  background: var(--c-success);
+  color: #fff;
+}
+
+:root[data-theme="light"] .set-row__check[aria-pressed="true"] { color: #fff; }
+
+@media (hover: hover) {
+  .set-row__check:hover { background: var(--c-surface-4); color: var(--c-text-2); }
+  .set-row__check[aria-pressed="true"]:hover { background: var(--c-success); color: #fff; }
+}
+
+/* Narrow phones: drop the RPE column into its own line rather than crushing
+   the weight and rep fields below a usable width. */
+@media (max-width: 380px) {
+  .set-row { grid-template-columns: 26px minmax(0, 1fr) minmax(0, 1fr) auto; gap: var(--s-1); }
+  .set-row__group { grid-template-columns: 30px minmax(0, 1fr) 30px; }
+  .set-row__rpe { display: none; }
+}
+
+/* The RPE select is a nicety; below ~430px the weight and rep fields need the
+   room more than it does. */
+@media (max-width: 430px) {
+  .set-row { grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .set-row__rpe { display: none; }
+}
+
+/* --- Exercise card, logging mode --------------------------------------- */
+
+.ex-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+}
+
+.ex-card__order {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--c-surface-3);
+  color: var(--c-text-2);
+  font-size: var(--t-caption);
+  font-weight: var(--w-semibold);
+}
+
+.ex-card--done .ex-card__order {
+  background: var(--c-success-dim);
+  color: var(--c-success);
+}
+
+/* Prescription strip: target load, last session, rep range, rest. */
+.ex-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-2);
+  margin-top: var(--s-3);
+}
+
+.ex-card__plan {
+  margin-top: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  background: var(--c-surface-3);
+  border-radius: var(--r-md);
+  font-size: var(--t-caption);
+  color: var(--c-text-2);
+  line-height: var(--lh-snug);
+}
+
+.ex-card__sets { margin-top: var(--s-3); }
+
+.ex-card__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--c-hairline);
+}
+
+/* Illustration placeholder — see TODO.md on why there is no artwork yet. */
+.ex-card__art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  height: 84px;
+  margin-top: var(--s-3);
+  border-radius: var(--r-md);
+  border: 1px dashed var(--c-hairline-firm);
+  background: var(--c-surface-3);
+  color: var(--c-text-3);
+}
+
+/* --- Rest bar ----------------------------------------------------------
+   Fixed above the tab bar. Not sticky inside the scroll area: rest is spent
+   scrolling, and a timer that scrolls away is a timer that gets missed.
+   ====================================================================== */
+
+.rest-bar {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--tabbar-h) + var(--safe-bottom) + var(--s-2));
+  z-index: var(--z-sheet);
+  width: min(calc(100% - var(--s-6)), 520px);
+  animation: enter var(--dur-base) var(--ease-spring);
+}
+
+.rest-bar[hidden] { display: none; }
+
+.rest-bar__body {
+  padding: var(--s-3) var(--s-4);
+  background: var(--c-surface-4);
+  border: 1px solid var(--c-hairline-firm);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+}
+
+.rest-bar__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--c-text-2);
+}
+
+.rest-bar__clock {
+  font-size: var(--t-title-3);
+  font-weight: var(--w-bold);
+  color: var(--c-text);
+  letter-spacing: var(--track-tight);
+  min-width: 3.2ch;
+}
+
+.rest-bar__label {
+  font-size: var(--t-footnote);
+  min-width: 0;
+}
+
+.rest-bar[data-urgent="true"] .rest-bar__clock { color: var(--c-warning); }
+
+@media (min-width: 1024px) {
+  .rest-bar {
+    left: auto;
+    right: var(--s-6);
+    transform: none;
+    bottom: var(--s-6);
+    width: 420px;
+  }
+}
+
+/* --- Bottom sheet ------------------------------------------------------ */
+
+.sheet {
+  padding: 0;
+  border: none;
+  background: transparent;
+  max-width: 100%;
+  max-height: 100%;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  /* The dialog element defaults to a centred box; this makes it a full-bleed
+     layer whose panel is pinned to the bottom edge. */
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.sheet::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  animation: sheet-fade var(--dur-base) var(--ease-standard);
+}
+
+.sheet__panel {
+  width: 100%;
+  max-width: 520px;
+  max-height: 86dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--s-3) var(--s-5) var(--s-5);
+  padding-bottom: calc(var(--s-5) + var(--safe-bottom));
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-hairline);
+  border-bottom: none;
+  border-radius: var(--r-2xl) var(--r-2xl) 0 0;
+  box-shadow: var(--shadow-lg);
+  animation: sheet-up var(--dur-base) var(--ease-spring);
+}
+
+.sheet__grip {
+  width: 36px;
+  height: 4px;
+  margin: 0 auto var(--s-4);
+  border-radius: var(--r-pill);
+  background: var(--c-hairline-firm);
+}
+
+.sheet__title {
+  font-size: var(--t-title-2);
+  font-weight: var(--w-bold);
+  letter-spacing: var(--track-tight);
+  text-align: center;
+}
+
+.sheet__text {
+  margin-top: var(--s-2);
+  font-size: var(--t-subhead);
+  color: var(--c-text-2);
+  text-align: center;
+  line-height: var(--lh-normal);
+}
+
+.sheet__body { margin-top: var(--s-4); }
+
+.sheet__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) 0;
+  color: var(--c-text-2);
+}
+
+.sheet__row + .sheet__row { border-top: 1px solid var(--c-hairline); }
+.sheet__row svg { stroke: currentColor; stroke-width: 1.8; fill: none; flex: 0 0 auto; }
+
+.sheet__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-5);
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(16px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+@keyframes sheet-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* On a wide screen a bottom sheet reads as a phone artefact; centre it. */
+@media (min-width: 768px) {
+  .sheet { align-items: center; }
+  .sheet__panel {
+    border-radius: var(--r-2xl);
+    border-bottom: 1px solid var(--c-hairline);
+    padding-bottom: var(--s-5);
+  }
+}
+
+/* --- Sticky finish bar ------------------------------------------------- */
+
+/* Sits at the end of the exercise list rather than floating, so it cannot
+   cover the last set row on a small screen. */
+.finish-panel {
+  margin-top: var(--s-6);
+  padding: var(--s-4);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-xl);
+}
+
+/* --- History ---------------------------------------------------------- */
+
+.history-row__bar {
+  width: 46px;
+  flex: 0 0 auto;
+}
+
+.session-detail__sets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  margin-top: var(--s-2);
+}
+
+.set-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 3px var(--s-2);
+  border-radius: var(--r-sm);
+  background: var(--c-surface-3);
+  font-size: var(--t-caption);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.set-chip--top { background: var(--c-success-dim); color: var(--c-success); }
+.set-chip__weight { font-weight: var(--w-semibold); }
+.set-chip__reps { color: var(--c-text-2); }
+.set-chip--top .set-chip__reps { color: inherit; opacity: 0.85; }

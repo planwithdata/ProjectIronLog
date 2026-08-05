@@ -50,21 +50,111 @@
       { label: 'Desktop · 1280', width: 1280, height: 1180 },
     ];
 
-    for (const size of SIZES) {
-      const figure = document.createElement('figure');
+    function mountFrames() {
+      for (const size of SIZES) {
+        const figure = document.createElement('figure');
 
-      const caption = document.createElement('figcaption');
-      caption.textContent = size.label;
+        const caption = document.createElement('figcaption');
+        caption.textContent = size.label;
 
-      const frame = document.createElement('iframe');
-      frame.src = `../index.html#/${route}`;
-      frame.width = size.width;
-      frame.height = size.height;
-      frame.setAttribute('title', size.label);
+        const frame = document.createElement('iframe');
+        frame.src = `../index.html#/${route}`;
+        frame.width = size.width;
+        frame.height = size.height;
+        frame.setAttribute('title', size.label);
 
-      figure.append(caption, frame);
-      document.body.appendChild(figure);
+        figure.append(caption, frame);
+        document.body.appendChild(figure);
+      }
     }
+
+    /*
+     * ?seed=logging fabricates a plausible training history and leaves a
+     * workout open, so the logging UI, rest timer and history views can be
+     * reviewed without lifting anything. Writes to this origin's Local
+     * Storage — run it against a throwaway browser profile, never one holding
+     * real training data.
+     */
+    async function seed(kind) {
+      const [db, programService, sessionService, bodyService, notesService] = await Promise.all([
+        import('../js/services/db.js'),
+        import('../js/services/program-service.js'),
+        import('../js/services/session-service.js'),
+        import('../js/services/body-service.js'),
+        import('../js/services/notes-service.js'),
+      ]);
+
+      localStorage.clear();
+      await db.init();
+      await programService.load();
+
+      const iso = (d) => d.toISOString().slice(0, 10);
+      const daysAgo = (n) => {
+        const d = new Date();
+        d.setDate(d.getDate() - n);
+        return iso(d);
+      };
+
+      // Three past Tuesdays of chest work, progressing.
+      const script = [
+        { day: 'tuesday-chest', when: 21, weight: 25,   reps: [8, 7, 7, 6] },
+        { day: 'tuesday-chest', when: 14, weight: 27.5, reps: [8, 8, 7, 6] },
+        { day: 'tuesday-chest', when: 7,  weight: 27.5, reps: [8, 8, 8, 8] },
+      ];
+
+      for (const step of script) {
+        const session = await sessionService.startSession(step.day, daysAgo(step.when));
+        for (const entry of session.entries) {
+          const exercise = programService.getExercise(entry.exerciseId);
+          for (let i = 0; i < entry.sets.length; i += 1) {
+            const isIncline = entry.exerciseId === 'incline-dumbbell-press';
+            await sessionService.updateSet(session.id, entry.exerciseId, i, {
+              weightKg: isIncline ? step.weight : (entry.sets[i].weightKg ?? 20),
+              reps: isIncline ? step.reps[i] : (exercise.reps.min + 1),
+              completed: true,
+            });
+          }
+        }
+        await sessionService.completeSession(session.id);
+      }
+
+      // Body data, so Home is not all em dashes.
+      for (let i = 20; i >= 0; i -= 2) {
+        await bodyService.logWeight(76 + (20 - i) * 0.05, daysAgo(i));
+      }
+      await bodyService.logComposition(
+        { weightKg: 77, bodyFatPercent: 14.6, muscleMassKg: 62.1, bmr: 1780 },
+        daysAgo(2)
+      );
+
+      await notesService.addNote({
+        text: 'Replace High-to-Low Fly with Low-to-High Fly',
+        category: 'exercise', source: 'ChatGPT', pinned: true,
+      });
+      await notesService.addNote({ text: 'Bulk until 79 kg', category: 'nutrition' });
+
+      if (kind === 'logging') {
+        // Leave today's session open, with the first two sets already ticked.
+        const today = programService.getTodayDay();
+        if (today && today.type === 'training') {
+          const open = await sessionService.startSession(today.id);
+          const first = open.entries[0];
+          for (let i = 0; i < Math.min(2, first.sets.length); i += 1) {
+            await sessionService.updateSet(open.id, first.exerciseId, i, {
+              weightKg: first.sets[i].weightKg ?? 30,
+              reps: first.targetReps?.[i] ?? 8,
+              completed: true,
+            });
+          }
+        }
+      }
+    }
+
+    const seedKind = params.get('seed');
+    if (seedKind) seed(seedKind).then(mountFrames).catch((error) => {
+      document.body.innerHTML = `<pre style="color:#fff">seed failed: ${error.stack || error}</pre>`;
+    });
+    else mountFrames();
   </script>
 </body>
 </html>

@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<!--
+  tools/e2e.html — Integration test for the logging flow.
+
+  tools/test.mjs covers the engine in isolation. This covers the part that
+  isolation cannot: services talking to real Local Storage in a real browser,
+  across a multi-session scenario. It drives the service layer directly rather
+  than clicking, so it is deterministic and fast; the DOM itself is checked by
+  preview.html and probe.html.
+
+    chrome --headless=new --virtual-time-budget=20000 \
+           --dump-dom http://127.0.0.1:PORT/tools/e2e.html
+
+  It writes to Local Storage on this origin, so run it against a throwaway
+  profile — never against a browser holding real training data.
+-->
+<html>
+<head><meta charset="utf-8"><title>e2e</title></head>
+<body style="margin:0;font:12px monospace;background:#fff;color:#111">
+<pre id="out">running…</pre>
+
+<script type="module">
+  import * as db from '../js/services/db.js';
+  import * as programService from '../js/services/program-service.js';
+  import * as sessionService from '../js/services/session-service.js';
+  import * as settingsService from '../js/services/settings-service.js';
+  import * as bodyService from '../js/services/body-service.js';
+  import * as notesService from '../js/services/notes-service.js';
+  import * as prService from '../js/services/pr-service.js';
+  import { ACTIONS } from '../js/engine/progression.js';
+
+  const lines = [];
+  let passed = 0;
+  let failed = 0;
+
+  function check(label, actual, expected) {
+    const ok = JSON.stringify(actual) === JSON.stringify(expected);
+    if (ok) { passed += 1; lines.push(`  ok   ${label}`); }
+    else { failed += 1; lines.push(`  FAIL ${label}\n         expected ${JSON.stringify(expected)}\n         actual   ${JSON.stringify(actual)}`); }
+  }
+
+  function ok(label, condition, detail = '') {
+    if (condition) { passed += 1; lines.push(`  ok   ${label}`); }
+    else { failed += 1; lines.push(`  FAIL ${label} ${detail}`); }
+  }
+
+  function section(title) { lines.push('', title); }
+
+  /** Log every set of an exercise at a given weight and rep count. */
+  async function logAll(sessionId, exerciseId, weightKg, repsPerSet) {
+    const session = sessionService.getSessionById(sessionId);
+    const entry = session.entries.find((e) => e.exerciseId === exerciseId);
+    for (let i = 0; i < entry.sets.length; i += 1) {
+      await sessionService.updateSet(sessionId, exerciseId, i, {
+        weightKg,
+        reps: Array.isArray(repsPerSet) ? repsPerSet[i] : repsPerSet,
+        completed: true,
+      });
+    }
+  }
+
+  try {
+    localStorage.clear();
+    await db.init();
+    await programService.load();
+
+    /* --- Program loaded ------------------------------------------------ */
+    section('program');
+    check('training days', programService.getTrainingDays().length, 5);
+    check('total exercises', programService.getAllExercises().length, 37);
+    ok('Saturday has Cable Lateral Raise at position 5',
+      programService.getDayById('saturday-upper').exercises[4].id === 'cable-lateral-raise');
+    ok('Tuesday has Low-to-High Cable Fly at position 4',
+      programService.getDayById('tuesday-chest').exercises[3].id === 'low-to-high-cable-fly');
+
+    /* --- First session: engine has no history -------------------------- */
+    section('session 1 — first ever');
+    // Every getRecommendation call passes an explicit date. Without one it
+    // defaults to the real today, which — against a seeded June start date —
+    // lands in a deload week and makes the scenario non-deterministic.
+    const incline = programService.getExercise('incline-dumbbell-press');
+    const plan1 = sessionService.getRecommendation(incline, '2026-06-02');
+    check('first session action', plan1.action, ACTIONS.START);
+    check('first session suggests no weight', plan1.weightKg, null);
+
+    const s1 = await sessionService.startSession('tuesday-chest', '2026-06-02');
+    ok('session is in-progress', s1.status === 'in-progress');
+    check('entries match the day', s1.entries.length, 9);
+    check('incline slots = prescribed sets', s1.entries[0].sets.length, 4);
+
+    // 27.5 kg for 8/8/7/6 — the brief's worked example.
+    await logAll(s1.id, 'incline-dumbbell-press', 27.5, [8, 8, 7, 6]);
+    await sessionService.completeSession(s1.id);
+
+    const after1 = sessionService.getSessionById(s1.id);
+    check('session completed', after1.status, 'completed');
+    ok('program start date was set', settingsService.getProfile().programStartDate === '2026-06-02');
+
+    /* --- The brief's worked example ------------------------------------ */
+    section('progression — the brief\'s example');
+    const plan2 = sessionService.getRecommendation(incline, '2026-06-09');
+    check('holds at 27.5', plan2.weightKg, 27.5);
+    check('action is hold', plan2.action, ACTIONS.HOLD);
+    check('targets 8/8/8/7', plan2.perSetReps, [8, 8, 8, 7]);
+
+    /* --- Second session: top of range everywhere ---------------------- */
+    section('session 2 — earns the increase');
+    const s2 = await sessionService.startSession('tuesday-chest', '2026-06-09');
+    check('pre-filled weight', s2.entries[0].sets[0].weightKg, 27.5);
+    check('pre-filled reps', s2.entries[0].sets.map((s) => s.reps), [8, 8, 8, 7]);
+
+    await logAll(s2.id, 'incline-dumbbell-press', 27.5, [8, 8, 8, 8]);
+    await sessionService.completeSession(s2.id);
+
+    const summary2 = sessionService.getSessionSummary(s2.id);
+    check('one exercise advancing', summary2.advancing.length, 1);
+    check('advancing lift', summary2.advancing[0].exerciseId, 'incline-dumbbell-press');
+    // 27.5 per hand, doubled for dumbbells: 27.5 * 32 * 2
+    check('volume', summary2.volumeKg, 27.5 * 32 * 2);
+
+    const plan3 = sessionService.getRecommendation(incline, '2026-06-16');
+    check('advances to 30', plan3.weightKg, 30);
+    check('action is advance', plan3.action, ACTIONS.ADVANCE);
+    check('resets to bottom of range', plan3.perSetReps, [6, 6, 6, 6]);
+
+    /* --- The scheduled deload week ------------------------------------- */
+    section('wave — week 5 deload');
+    // Program started 2026-06-02; 2026-06-30 is 28 days later, so week 5.
+    const wave5 = programService.getTrainingWeek('2026-06-30');
+    check('is week 5', wave5.week, 5);
+    check('is the deload week', wave5.isDeload, true);
+    check('4 sets become 2', programService.deloadSets(4), 2);
+    check('3 sets become 2', programService.deloadSets(3), 2);
+
+    const planDeload = sessionService.getRecommendation(incline, '2026-06-30');
+    check('deload action', planDeload.action, ACTIONS.DELOAD_WAVE);
+    check('deload cuts the load to ~65%', planDeload.weightKg, 17.5);
+    check('deload honours the reduced set count', planDeload.perSetReps, [6, 6]);
+
+    // Week 6 comes off the deload and resumes from the real working weight,
+    // not from the reduced deload load.
+    const planAfterDeload = sessionService.getRecommendation(incline, '2026-07-07');
+    check('week 6 is not a deload', programService.getTrainingWeek('2026-07-07').isDeload, false);
+    check('resumes from the working weight', planAfterDeload.weightKg, 30);
+
+    /* --- Personal records --------------------------------------------- */
+    section('personal records');
+    const records = prService.getRecordsFor('incline-dumbbell-press');
+    check('heaviest weight', records.weight.value, 27.5);
+    check('most reps', records.reps.value, 8);
+    ok('estimated 1RM present', records.e1rm && records.e1rm.value > 27.5);
+    const setIn2 = prService.getRecordsSetIn(s2.id);
+    ok('session 2 set at least one record', setIn2.length > 0, `(got ${setIn2.length})`);
+    ok('latest record is the incline press',
+      prService.getLatestRecord()?.exerciseId === 'incline-dumbbell-press');
+
+    /* --- Resume behaviour --------------------------------------------- */
+    section('resume and guards');
+    const s3 = await sessionService.startSession('wednesday-back-biceps', '2026-06-10');
+    const s3again = await sessionService.startSession('wednesday-back-biceps', '2026-06-10');
+    check('starting again resumes the same session', s3again.id, s3.id);
+    ok('only one session open at a time',
+      db.read('sessions').filter((s) => s.status === 'in-progress').length === 1);
+
+    let refused = false;
+    try { await sessionService.reopenSession(s1.id); } catch { refused = true; }
+    ok('cannot reopen a session while another is open', refused);
+
+    /* --- Add / remove sets -------------------------------------------- */
+    section('editing sets');
+    const before = sessionService.getSessionById(s3.id).entries[0].sets.length;
+    await sessionService.addSet(s3.id, 'pull-ups');
+    check('added a set', sessionService.getSessionById(s3.id).entries[0].sets.length, before + 1);
+    await sessionService.removeSet(s3.id, 'pull-ups', before);
+    check('removed it again', sessionService.getSessionById(s3.id).entries[0].sets.length, before);
+
+    await sessionService.abandonSession(s3.id);
+    ok('abandoned session is gone', sessionService.getActiveSession() === null);
+
+    /* --- Bodyweight, reps first --------------------------------------- */
+    section('bodyweight — reps first');
+    const pullUps = programService.getExercise('pull-ups');
+    const s4 = await sessionService.startSession('wednesday-back-biceps', '2026-06-16');
+    await logAll(s4.id, 'pull-ups', 0, [10, 10, 10, 10]);   // top of the 6-10 range
+    await sessionService.completeSession(s4.id);
+    const planPull = sessionService.getRecommendation(pullUps, '2026-06-23');
+    check('graduates to added load', planPull.weightKg, 2.5);
+    check('action is advance', planPull.action, ACTIONS.ADVANCE);
+
+    /* --- Week completion and streak ----------------------------------- */
+    section('derived stats');
+    const week = sessionService.getWeekCompletion('2026-06-10');   // a Wednesday
+    check('scheduled so far that week', week.total, 2);
+    ok('week percent is a number 0-100', week.percent >= 0 && week.percent <= 100);
+    ok('days since last workout is a number',
+      typeof sessionService.getDaysSinceLastWorkout('2026-06-20') === 'number');
+
+    /* --- Body + notes services ---------------------------------------- */
+    section('body and notes');
+    await bodyService.logWeight(76.4, '2026-06-01');
+    await bodyService.logWeight(76.9, '2026-06-01');   // same day replaces
+    check('one entry per day', bodyService.getWeightEntries().length, 1);
+    check('latest weight is the replacement', bodyService.getLatestWeight().weightKg, 76.9);
+
+    await bodyService.logComposition({ weightKg: 77.2, bodyFatPercent: 14.8 }, '2026-06-08');
+    check('composition stored', bodyService.getCompositionEntries().length, 1);
+    check('weight series kept in step', bodyService.getWeightEntries().length, 2);
+    check('body fat readable', bodyService.getLatestField('bodyFatPercent').value, 14.8);
+
+    await notesService.addNote({ text: 'Bulk until 79 kg', category: 'nutrition', pinned: true });
+    await notesService.addNote({ text: 'More upper chest', dayId: 'tuesday-chest' });
+    check('two notes', notesService.countActive(), 2);
+    check('pinned note floats', notesService.getNotes()[0].text, 'Bulk until 79 kg');
+    check('day-scoped note appears on its day',
+      notesService.getNotesFor({ dayId: 'tuesday-chest' }).length, 2);
+    check('day-scoped note hidden elsewhere',
+      notesService.getNotesFor({ dayId: 'thursday-legs' }).length, 1);
+
+    /* --- Backup round trip -------------------------------------------- */
+    section('backup');
+    const snapshot = db.exportAll();
+    const sessionCount = sessionService.getCompletedSessions().length;
+    await db.reset();
+    check('reset clears sessions', sessionService.getCompletedSessions().length, 0);
+    await db.importAll(snapshot);
+    check('restore brings sessions back', sessionService.getCompletedSessions().length, sessionCount);
+    check('restore brings notes back', notesService.countActive(), 2);
+    ok('records recompute after restore',
+      prService.getRecordsFor('incline-dumbbell-press')?.weight.value === 27.5);
+
+    let rejected = false;
+    try { await db.importAll({ nope: true }); } catch { rejected = true; }
+    ok('a non-IronLog file is rejected', rejected);
+
+  } catch (error) {
+    failed += 1;
+    lines.push('', `THREW: ${error && error.stack ? error.stack : error}`);
+  } finally {
+    localStorage.clear();
+    lines.unshift(`RESULT ${failed === 0 ? 'PASS' : 'FAIL'} — ${passed} passed, ${failed} failed`);
+    document.getElementById('out').textContent = lines.join('\n');
+    document.title = failed === 0 ? 'PASS' : 'FAIL';
+  }
+</script>
+</body>
+</html>

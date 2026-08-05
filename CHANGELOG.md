@@ -4,6 +4,103 @@ All notable changes to Project IronLog. Follows [Semantic Versioning](https://se
 
 ---
 
+## [1.1.0] — 2026-08-05 — Session 2: Workout engine
+
+Live set logging, the rest timer, workout history, and the progressive
+overload engine.
+
+### Added
+
+**Progressive overload engine** (`js/engine/progression.js`)
+- Double progression implemented exactly as the source program specifies:
+  add a rep to any set below the top of the range; once every working set
+  reaches the top, add that exercise's increment and drop back to the bottom.
+- The increment defaults to the **bottom** of the prescribed range, because
+  the source document is explicit that `+X kg` is a ceiling, not a schedule.
+- `reps-first` handling for Pull-ups, Hanging Knee Raise and Ab Wheel Rollout:
+  no external load until the top of the range is comfortable, then one
+  increment via belt or vest.
+- Stall detection — three sessions with no rep or weight increase drops the
+  load ~10% and rebuilds.
+- Scheduled Week 5 deload: sets cut ~40%, load at ~65%. Deload sessions are
+  excluded when judging the next real session, so the wave cannot ratchet the
+  whole program downwards every fifth week.
+- `workingWeight` takes the heaviest completed set, not the first, so working
+  up across sets does not stall the lifter.
+- The module is pure — no imports, no storage, no globals — so it is testable
+  outside a browser.
+
+**Estimated 1RM** (`js/engine/one-rep-max.js`)
+- Epley, extracted from pr-service so it is pure and testable. `loadForReps`
+  inverts it for the reports layer.
+
+**Logging UI**
+- Set rows with weight and rep steppers either side of a numeric field, an
+  RPE picker, and a large commit checkmark. Fields arrive pre-filled from the
+  engine, so a set that goes to plan is one tap.
+- Values commit on blur or on tick, never on keystroke, so a half-typed number
+  is never stored.
+- Add a set inline; press and hold a set number to remove an extra one.
+- Ticking a set patches only that card — the page is not re-rendered, so the
+  scroll position and any focused field survive.
+- Last-session line per exercise, with a marker when the top of the range was
+  reached.
+- Finish panel with live completion, plus early-finish and discard flows.
+- Completion sheet: sets, exercises, volume, duration, which lifts earned an
+  increase, and any records set.
+
+**Rest timer** (`js/services/rest-timer.js`, `components/rest-bar.js`)
+- Timestamp-based rather than tick-based: iOS suspends timers when the screen
+  locks, so remaining time is always recomputed from the clock. Pocket the
+  phone for two minutes and the countdown is correct on return.
+- Auto-starts on set completion, per-exercise duration from the program.
+- Floating bar above the tab bar with +30s and Skip, colour shift under 10s.
+- WebAudio beep synthesised at runtime — no asset to cache or 404 offline.
+
+**Workout history** (`js/pages/history.js`)
+- Sessions grouped by month with per-session completion and volume.
+- Session detail: logged sets as chips, marked when at the top of the range,
+  records set, and totals.
+- Re-open a completed session for editing, or delete it.
+
+**Sheets** (`components/sheet.js`)
+- `<dialog>`-based bottom sheet replacing `window.confirm`, which cannot show
+  a summary and renders with the site URL in an installed PWA.
+
+**Session service**
+- Engine recommendation frozen into the session at start, so a report can say
+  what was prescribed as well as what was done, and the target cannot shift
+  under the user mid-session.
+- `getSessionSummary`, `isSessionComplete`, `reopenSession`, `addSet`,
+  `removeSet`, `getRecommendation`.
+
+**Testing**
+- `tools/test.mjs` — 28 assertions over the engine via `node --test`,
+  including the worked example from the brief (6–8 range at 27.5 kg logged
+  8/8/7/6 → hold 27.5, target 8/8/8/7).
+- `tools/e2e.html` — 61 assertions driving the service layer against real
+  Local Storage in a real browser: multi-session progression, deload wave,
+  PR detection, resume guards, set editing, body and notes services, and a
+  backup round trip.
+- `tools/preview.html?seed=logging` seeds a plausible training history and
+  leaves a session open, so the logging UI can be reviewed without lifting.
+
+### Fixed
+
+- `card.append()` rendered the literal text "null" for absent optional
+  children; the native DOM method stringifies null, unlike the `append`
+  helper in dom.js.
+- The set row grid declared four columns but rendered five children when the
+  RPE picker was shown, wrapping the commit checkmark onto its own line.
+- "Latest PR" tie-broke arbitrarily when a session set several records on one
+  day. It now prefers estimated 1RM, then the heaviest, so the headline is the
+  day's biggest lift rather than whichever exercise sorted first.
+- Page titles were duplicated: the app header and the page body both rendered
+  the route name, and both as `<h1>`. Redundant page titles are removed and
+  the remaining content headings demoted to `<h2>`.
+
+---
+
 ## [1.0.0] — 2026-08-05 — Session 1: Architecture
 
 The foundation: design system, storage architecture, navigation, Home page,

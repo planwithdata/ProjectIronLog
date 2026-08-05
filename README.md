@@ -4,7 +4,7 @@ A personal gym companion. Mobile-first Progressive Web App: installable on an
 iPhone Home Screen, works offline, stores everything on the device, and never
 talks to a server.
 
-**Version 1.0.0 — Session 1 of 5 complete.**
+**Version 1.1.0 — Sessions 1 and 2 of 5 complete.**
 
 ---
 
@@ -15,7 +15,9 @@ talks to a server.
 | Design system, app shell, navigation | Done |
 | Home page | Done |
 | Program data parsed from source documents | Done — 37 exercises across 5 training days |
-| Workout page | Read-only program browser (logging lands in Session 2) |
+| Progressive overload engine | Done — double progression, deload wave, stall detection |
+| Workout history | Done — per-session detail, re-open, delete |
+| Workout page | Live set logging, rest timer, completion summary |
 | Storage layer with backup & restore | Done |
 | Theme (dark / light / system), units (kg / lb) | Done |
 | PWA: manifest, icons, offline cache | Done |
@@ -97,6 +99,7 @@ css/
   base.css                 reset, element defaults, text utilities, a11y
   layout.css               app shell, header, tab bar → sidebar, grids
   components.css           card, button, pill, stat, ring, list, input, toast
+  workout.css              set rows, rest bar, sheets, history chips
 
 js/
   config.js                app name and version
@@ -115,12 +118,16 @@ js/
     notes-service.js       coach notes
     pr-service.js          personal record detection
     settings-service.js    preferences, profile, theme
-  pages/                   home, workout, progress, reports, settings
+    rest-timer.js          timestamp-based rest countdown
+  engine/
+    progression.js         double progression — pure, tested
+    one-rep-max.js         Epley estimate — pure, tested
+  pages/                   home, workout, history, progress, reports, settings
 
-components/                nav, ring, stat, toast — shared UI primitives
+components/                nav, ring, stat, toast, set-row, rest-bar, sheet
 data/workouts.json         the training program (replaceable)
 icons/                     PWA icons, generated from icon.svg
-tools/                     check.py, preview.html, probe.html
+tools/                     check.py, test.mjs, e2e.html, preview.html, probe.html
 ```
 
 ### Why these choices
@@ -188,8 +195,10 @@ Double progression, exactly as the source document specifies:
 - 4-week wave, then a deload week: sets cut ~40%, load at 60–70%.
 - A lift stalled for 3 sessions drops ~10% and rebuilds.
 
-The engine that applies these rules arrives in Session 2. The rules themselves
-are already data, in `progression` at the top of `workouts.json`.
+These rules live as data in `progression` at the top of `workouts.json`, and
+are applied by `js/engine/progression.js` — a pure module with no imports,
+no storage and no globals, so it can be tested outside a browser. It is the
+one place where a quiet mistake would corrupt years of training decisions.
 
 ---
 
@@ -197,11 +206,20 @@ are already data, in `progression` at the top of `workouts.json`.
 
 ```bash
 python tools/check.py          # parses every module, resolves every import
+node --test tools/test.mjs     # 28 assertions over the progression engine
 ```
+
+Open `tools/e2e.html` over HTTP for 61 integration assertions against real
+Local Storage: multi-session progression, the deload wave, PR detection,
+resume guards, set editing, and a backup round trip. It clears Local Storage
+on the origin it runs against, so use a throwaway browser profile — never one
+holding real training data.
 
 `tools/preview.html` renders the app at phone, iPad and desktop widths side by
 side — the fastest way to catch a mobile layout regression. `?theme=light`
-switches palette, `?route=workout` switches page.
+switches palette, `?route=workout` switches page, and `?seed=logging` fabricates
+a training history and leaves a session open so the logging UI can be reviewed
+without lifting anything (it also clears Local Storage).
 
 `tools/probe.html` reports any element wider than a phone viewport, which is
 the failure mode that a desktop browser window will never show you.
