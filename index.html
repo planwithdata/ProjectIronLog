@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+
+  <!--
+    viewport-fit=cover lets the app draw behind the notch and the home
+    indicator; layout.css then pays that back with env(safe-area-inset-*).
+    Without it there are black bars on an iPhone in standalone mode.
+    user-scalable is left enabled — pinch-zoom is an accessibility feature,
+    and the 17px input font size already prevents Safari's focus zoom.
+  -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+  <title>IronLog</title>
+  <meta name="description" content="Personal gym companion: workout logging, progressive overload and body composition tracking. Works offline, stores everything on your device.">
+
+  <!-- Colour of the browser/status bar chrome. Kept in step with the theme
+       by settings-service.applyTheme(). -->
+  <meta name="theme-color" content="#000000">
+
+  <!-- PWA -->
+  <link rel="manifest" href="./manifest.json">
+
+  <!-- iOS standalone mode. Safari still ignores parts of the manifest, so
+       these Apple-specific hints are what actually make the Home Screen
+       install behave like an app. -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="IronLog">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
+
+  <!-- Stylesheets load in dependency order: tokens define the variables that
+       every later sheet consumes. -->
+  <link rel="stylesheet" href="./css/tokens.css">
+  <link rel="stylesheet" href="./css/base.css">
+  <link rel="stylesheet" href="./css/layout.css">
+  <link rel="stylesheet" href="./css/components.css">
+
+  <script>
+    /*
+     * Anti-flash theme shim.
+     *
+     * This is the one place outside the storage layer that touches Local
+     * Storage directly, and it is deliberate: it has to run before the first
+     * paint, which is long before the module graph has loaded. Reading the
+     * saved theme here stops a light-mode user seeing a black frame on every
+     * launch. It only ever reads, and it only ever reads this one key.
+     */
+    (function () {
+      try {
+        var raw = localStorage.getItem('ironlog:v1:settings');
+        var theme = raw ? JSON.parse(raw).theme : 'dark';
+        if (theme === 'light' || theme === 'system') {
+          document.documentElement.setAttribute('data-theme', theme);
+        }
+      } catch (e) {
+        /* No storage (private browsing) — the dark default in the markup stands. */
+      }
+    })();
+  </script>
+</head>
+
+<body>
+  <!-- The shell is built by app.js. Until then this holds a minimal loading
+       state so a slow cold start is never a blank white screen. -->
+  <div id="root">
+    <div style="display:flex;align-items:center;justify-content:center;height:100dvh;color:var(--c-text-3);font:500 15px system-ui">
+      Loading IronLog…
+    </div>
+  </div>
+
+  <noscript>
+    <div style="padding:24px;color:#f5f5f7;font:400 17px system-ui">
+      <strong>IronLog needs JavaScript.</strong>
+      <p style="margin-top:8px;color:rgba(235,235,245,.62)">
+        The whole app runs in your browser — there is no server to render it.
+      </p>
+    </div>
+  </noscript>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Agent / tooling scratch
+.claude/
+.smoke.*
+*.log
+
+# Document-extraction working files. The source .docx and .pdf are committed;
+# these intermediates are regenerable and only clutter diffs.
+.pdfpages/
+.pdfimgs/
+pdf_dump.txt
+docx_dump.txt
+
+# Generated reports (exports land here at the user's choosing)
+reports/*
+!reports/.gitkeep
+
+# There is no build step and no dependencies — node_modules should never exist.
+node_modules/

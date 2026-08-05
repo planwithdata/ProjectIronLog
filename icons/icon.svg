@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="IronLog">
+  <!--
+    A dumbbell, drawn on the same 24-unit grid logic as the in-app icons and
+    scaled up. Flat shapes and a single accent so it stays legible at 40px on
+    a Home Screen and does not fight the iOS icon grid.
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1f1f26"/>
+      <stop offset="1" stop-color="#0a0a0d"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+
+  <g stroke="#0a84ff" stroke-width="26" stroke-linecap="round" fill="none">
+    <!-- Outer plates -->
+    <path d="M136 168v176"/>
+    <path d="M376 168v176"/>
+    <!-- Inner plates -->
+    <path d="M96 214v84"/>
+    <path d="M416 214v84"/>
+    <!-- Bar -->
+    <path d="M136 256h240"/>
+  </g>
+</svg>

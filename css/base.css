@@ -1,0 +1,170 @@
+/* ==========================================================================
+   base.css — Reset and element defaults
+   ========================================================================== */
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+* { margin: 0; padding: 0; }
+
+html {
+  /* Prevent iOS Safari inflating text in landscape */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  background: var(--c-bg);
+  /* Keep the rubber-band overscroll colour matching the app, not white */
+  overscroll-behavior-y: none;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--t-body);
+  line-height: var(--lh-normal);
+  color: var(--c-text);
+  background: var(--c-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100%;
+  /* Disable the grey flash on tap in iOS Safari — we style :active instead */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Headings inherit weight/size from utility classes so that semantic level
+   and visual size stay independent. */
+h1, h2, h3, h4, h5, h6 {
+  font-size: inherit;
+  font-weight: var(--w-semibold);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--track-tight);
+}
+
+img, svg, video, canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  border-radius: 0;
+}
+
+button {
+  cursor: pointer;
+  /* iOS refuses to honour background/border-radius on buttons without this */
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
+}
+
+button:disabled { cursor: not-allowed; }
+
+a {
+  color: var(--c-accent);
+  text-decoration: none;
+}
+
+ul, ol { list-style: none; }
+
+/* Numeric readouts (weights, reps, timers) should not reflow as digits
+   change width. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* --- Focus -------------------------------------------------------------
+   Visible focus for keyboard users only; pointer users never see a ring. */
+:focus { outline: none; }
+
+:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* --- Accessibility helpers -------------------------------------------- */
+
+/* Available to screen readers, invisible on screen. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  top: var(--s-2);
+  left: 50%;
+  transform: translate(-50%, -200%);
+  z-index: 200;
+  padding: var(--s-3) var(--s-5);
+  background: var(--c-surface-3);
+  color: var(--c-text);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-md);
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+.skip-link:focus-visible { transform: translate(-50%, 0); }
+
+/* --- Text utilities --------------------------------------------------- */
+
+.t-hero     { font-size: var(--t-hero);     font-weight: var(--w-bold);     letter-spacing: var(--track-tight); line-height: var(--lh-tight); }
+.t-title-1  { font-size: var(--t-title-1);  font-weight: var(--w-bold);     letter-spacing: var(--track-tight); line-height: var(--lh-tight); }
+.t-title-2  { font-size: var(--t-title-2);  font-weight: var(--w-semibold); letter-spacing: var(--track-tight); line-height: var(--lh-snug); }
+.t-title-3  { font-size: var(--t-title-3);  font-weight: var(--w-semibold); letter-spacing: var(--track-tight); line-height: var(--lh-snug); }
+.t-body     { font-size: var(--t-body); }
+.t-callout  { font-size: var(--t-callout); }
+.t-subhead  { font-size: var(--t-subhead); }
+.t-footnote { font-size: var(--t-footnote); }
+.t-caption  { font-size: var(--t-caption); }
+
+.t-dim    { color: var(--c-text-2); }
+.t-faint  { color: var(--c-text-3); }
+.t-accent { color: var(--c-accent); }
+
+.t-medium   { font-weight: var(--w-medium); }
+.t-semibold { font-weight: var(--w-semibold); }
+.t-bold     { font-weight: var(--w-bold); }
+
+/* Small all-caps label used above grouped content, as in iOS Settings. */
+.t-overline {
+  font-size: var(--t-caption);
+  font-weight: var(--w-semibold);
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--c-text-3);
+}
+
+.t-center { text-align: center; }
+
+/* Truncate to a single line. */
+.t-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* --- Motion preferences ---------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

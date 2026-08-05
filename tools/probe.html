@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<!--
+  tools/probe.html — Layout diagnostic.
+
+  Loads the app in a phone-width iframe, waits for boot, then reports which
+  elements are wider than the viewport. Read the result with:
+
+    chrome --headless=new --virtual-time-budget=9000 \
+           --dump-dom http://127.0.0.1:PORT/tools/probe.html
+
+  Overflow on a phone is the single most common way a mobile-first layout
+  breaks, and it is invisible in a desktop window. This makes it measurable.
+-->
+<html>
+<head><meta charset="utf-8"><title>probe</title></head>
+<body style="margin:0;font:12px monospace;background:#fff;color:#000">
+  <pre id="out">measuring…</pre>
+  <iframe id="frame" src="../index.html#/home"
+          style="width:402px;height:900px;border:0"></iframe>
+
+  <script>
+    const WIDTH = 402;
+
+    function report(lines) {
+      document.getElementById('out').textContent = lines.join('\n');
+    }
+
+    setTimeout(() => {
+      const frame = document.getElementById('frame');
+      const doc = frame.contentDocument;
+      if (!doc) return report(['ERROR: no iframe document']);
+
+      const lines = [];
+      const html = doc.documentElement;
+      const body = doc.body;
+
+      lines.push(`booted=${html.dataset.booted || 'false'}`);
+      lines.push(`viewport=${WIDTH}`);
+      lines.push(`html.scrollWidth=${html.scrollWidth} body.scrollWidth=${body.scrollWidth}`);
+
+      const main = doc.querySelector('.app-main');
+      if (main) lines.push(`main.scrollWidth=${main.scrollWidth} main.clientWidth=${main.clientWidth}`);
+
+      const page = doc.querySelector('.page');
+      if (page) {
+        const rect = page.getBoundingClientRect();
+        lines.push(`page width=${rect.width.toFixed(1)} scrollWidth=${page.scrollWidth}`);
+      }
+
+      // Every element whose right edge lands beyond the viewport.
+      lines.push('', 'OVERFLOWING ELEMENTS (right edge > viewport):');
+      let found = 0;
+      for (const node of doc.querySelectorAll('*')) {
+        const rect = node.getBoundingClientRect();
+        if (rect.width === 0) continue;
+        if (rect.right <= WIDTH + 0.5) continue;
+        found += 1;
+        if (found > 25) continue;
+        const cls = node.className && typeof node.className === 'string'
+          ? '.' + node.className.trim().split(/\s+/).join('.')
+          : '';
+        const text = (node.textContent || '').trim().slice(0, 28).replace(/\s+/g, ' ');
+        lines.push(
+          `${node.tagName.toLowerCase()}${cls}` +
+          ` | left=${rect.left.toFixed(0)} right=${rect.right.toFixed(0)} w=${rect.width.toFixed(0)}` +
+          ` | "${text}"`
+        );
+      }
+      if (!found) lines.push('none — layout fits');
+
+      // Computed values of the layout-critical tokens.
+      lines.push('', 'TOKENS:');
+      const styles = frame.contentWindow.getComputedStyle(html);
+      for (const token of ['--gutter', '--safe-left', '--safe-right', '--page-max', '--tabbar-h']) {
+        lines.push(`${token} = "${styles.getPropertyValue(token).trim()}"`);
+      }
+
+      report(lines);
+    }, 2500);
+  </script>
+</body>
+</html>

@@ -1,0 +1,573 @@
+/* ==========================================================================
+   components.css — Reusable UI primitives
+   Cards, buttons, pills, badges, rings, list rows, inputs, sheets, toasts.
+   Every component reads from tokens.css only.
+   ========================================================================== */
+
+/* --- Card -------------------------------------------------------------- */
+
+.card {
+  background: var(--c-surface-1);
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-xl);
+  padding: var(--s-4);
+  box-shadow: var(--shadow-sm);
+}
+
+.card--flush { padding: 0; overflow: hidden; }
+.card--raised { background: var(--c-surface-2); box-shadow: var(--shadow-md); }
+.card--quiet { background: transparent; box-shadow: none; }
+
+.card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+}
+
+.card__title {
+  font-size: var(--t-callout);
+  font-weight: var(--w-semibold);
+  letter-spacing: var(--track-tight);
+}
+
+/* Card that acts as a link/button. */
+.card--tappable {
+  display: block;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  transition: transform var(--dur-fast) var(--ease-standard),
+              background-color var(--dur-fast) var(--ease-standard);
+}
+
+.card--tappable:active { transform: scale(0.985); background: var(--c-surface-2); }
+
+@media (hover: hover) {
+  .card--tappable:hover { background: var(--c-surface-2); }
+}
+
+/* --- Hero card (today's workout) -------------------------------------- */
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-2xl);
+  padding: var(--s-5);
+  box-shadow: var(--shadow-md);
+}
+
+/* A soft accent wash in the top-right corner, kept subtle so the card
+   still reads as a surface rather than as a coloured banner. */
+.hero::after {
+  content: "";
+  position: absolute;
+  top: -60%;
+  right: -30%;
+  width: 78%;
+  height: 190%;
+  background: radial-gradient(closest-side, var(--c-accent-dim), transparent 72%);
+  pointer-events: none;
+}
+
+.hero > * { position: relative; }
+
+.hero__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-bottom: var(--s-2);
+}
+
+.hero__title {
+  font-size: var(--t-title-1);
+  font-weight: var(--w-bold);
+  letter-spacing: var(--track-tight);
+  line-height: var(--lh-tight);
+}
+
+.hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-4);
+  margin-top: var(--s-3);
+  color: var(--c-text-2);
+  font-size: var(--t-subhead);
+}
+
+.hero__meta-item { display: flex; align-items: center; gap: var(--s-1); }
+
+/* --- Buttons ---------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  min-height: var(--touch);
+  padding: 0 var(--s-5);
+  border-radius: var(--r-pill);
+  font-size: var(--t-callout);
+  font-weight: var(--w-semibold);
+  letter-spacing: -0.01em;
+  color: var(--c-text);
+  background: var(--c-surface-3);
+  transition: transform var(--dur-fast) var(--ease-spring),
+              background-color var(--dur-fast) var(--ease-standard),
+              opacity var(--dur-fast) var(--ease-standard);
+}
+
+.btn:active { transform: scale(0.96); }
+
+.btn--primary { background: var(--c-accent); color: var(--c-accent-text); }
+.btn--danger  { background: var(--c-danger-dim); color: var(--c-danger); }
+.btn--ghost   { background: transparent; color: var(--c-accent); }
+.btn--tinted  { background: var(--c-accent-dim); color: var(--c-accent); }
+
+/* Full-width primary action, e.g. Start Workout. */
+.btn--block { display: flex; width: 100%; }
+.btn--lg { min-height: 52px; font-size: var(--t-body); padding: 0 var(--s-6); }
+.btn--sm { min-height: 34px; padding: 0 var(--s-3); font-size: var(--t-footnote); }
+
+.btn:disabled { opacity: 0.4; transform: none; }
+
+@media (hover: hover) {
+  .btn:not(:disabled):hover { filter: brightness(1.12); }
+}
+
+.btn__icon { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2;
+             fill: none; stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
+
+/* Icon-only button for headers. */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch);
+  height: var(--touch);
+  border-radius: var(--r-pill);
+  color: var(--c-accent);
+  transition: background-color var(--dur-fast) var(--ease-standard),
+              transform var(--dur-fast) var(--ease-spring);
+}
+
+.btn-icon:active { transform: scale(0.9); }
+.btn-icon svg { width: 22px; height: 22px; stroke: currentColor; stroke-width: 1.9;
+                fill: none; stroke-linecap: round; stroke-linejoin: round; }
+
+@media (hover: hover) {
+  .btn-icon:hover { background: var(--c-surface-3); }
+}
+
+/* --- Pills and badges ------------------------------------------------- */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: 3px var(--s-2);
+  border-radius: var(--r-pill);
+  background: var(--c-surface-3);
+  color: var(--c-text-2);
+  font-size: var(--t-caption);
+  font-weight: var(--w-semibold);
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.pill--accent  { background: var(--c-accent-dim);  color: var(--c-accent); }
+.pill--success { background: var(--c-success-dim); color: var(--c-success); }
+.pill--warning { background: var(--c-warning-dim); color: var(--c-warning); }
+.pill--danger  { background: var(--c-danger-dim);  color: var(--c-danger); }
+.pill--pr      { background: var(--c-pr-dim);      color: var(--c-pr); }
+
+.pill--rest { background: transparent; border: 1px solid var(--c-hairline-firm); }
+
+/* --- Stat tile -------------------------------------------------------- */
+
+.stat {
+  background: var(--c-surface-1);
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-lg);
+  padding: var(--s-3) var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stat__label {
+  font-size: var(--t-caption);
+  font-weight: var(--w-medium);
+  color: var(--c-text-3);
+  letter-spacing: 0;
+}
+
+.stat__value {
+  font-size: var(--t-title-2);
+  font-weight: var(--w-bold);
+  letter-spacing: var(--track-tight);
+  line-height: var(--lh-tight);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat__unit {
+  font-size: var(--t-footnote);
+  font-weight: var(--w-medium);
+  color: var(--c-text-2);
+  margin-left: 2px;
+  letter-spacing: 0;
+}
+
+.stat__foot {
+  font-size: var(--t-caption);
+  color: var(--c-text-2);
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+
+.stat__delta--up   { color: var(--c-success); }
+.stat__delta--down { color: var(--c-danger); }
+.stat__delta--flat { color: var(--c-text-3); }
+
+/* Empty stat: dashes rather than zeroes, so "no data" never reads as "0". */
+.stat--empty .stat__value { color: var(--c-text-3); font-weight: var(--w-semibold); }
+
+/* --- Progress ring ---------------------------------------------------- */
+
+.ring { display: block; transform: rotate(-90deg); }
+
+.ring__track {
+  fill: none;
+  stroke: var(--c-track);
+}
+
+.ring__fill {
+  fill: none;
+  stroke: var(--c-accent);
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--dur-slow) var(--ease-spring);
+}
+
+.ring-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.ring-wrap__label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--track-tight);
+  line-height: 1;
+}
+
+/* --- Linear progress bar ---------------------------------------------- */
+
+.bar {
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--c-track);
+  overflow: hidden;
+}
+
+.bar__fill {
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--c-accent);
+  transition: width var(--dur-slow) var(--ease-spring);
+}
+
+.bar__fill--success { background: var(--c-success); }
+.bar__fill--warning { background: var(--c-warning); }
+
+/* --- List rows (iOS grouped list) ------------------------------------- */
+
+.list {
+  background: var(--c-surface-1);
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-xl);
+  overflow: hidden;
+}
+
+.list__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  min-height: var(--touch);
+  padding: var(--s-3) var(--s-4);
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  transition: background-color var(--dur-fast) var(--ease-standard);
+}
+
+/* Inset separators between rows, not around the group. */
+.list__row + .list__row {
+  box-shadow: inset 0 1px 0 var(--c-hairline);
+}
+
+.list__row--tappable:active { background: var(--c-surface-3); }
+
+@media (hover: hover) {
+  .list__row--tappable:hover { background: var(--c-surface-2); }
+}
+
+.list__body { flex: 1 1 auto; min-width: 0; }
+
+.list__title {
+  font-size: var(--t-callout);
+  font-weight: var(--w-medium);
+}
+
+.list__sub {
+  font-size: var(--t-footnote);
+  color: var(--c-text-2);
+  margin-top: 1px;
+}
+
+.list__value {
+  font-size: var(--t-callout);
+  color: var(--c-text-2);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.list__chevron {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  stroke: var(--c-text-3);
+  stroke-width: 2.2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Leading icon chip. */
+.list__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  background: var(--c-surface-3);
+  flex: 0 0 auto;
+}
+
+.list__icon svg { width: 17px; height: 17px; stroke: var(--c-text-2); stroke-width: 1.9;
+                  fill: none; stroke-linecap: round; stroke-linejoin: round; }
+
+/* --- Note card (coach notes) ------------------------------------------ */
+
+.note {
+  position: relative;
+  padding: var(--s-3) var(--s-4);
+  padding-left: var(--s-4);
+  background: var(--c-surface-1);
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-lg);
+  /* Accent rail on the leading edge, logical so it flips under RTL. */
+  border-inline-start: 3px solid var(--c-accent);
+  font-size: var(--t-subhead);
+  line-height: var(--lh-normal);
+}
+
+.note__meta {
+  margin-top: var(--s-2);
+  font-size: var(--t-caption);
+  color: var(--c-text-3);
+}
+
+/* --- Inputs ----------------------------------------------------------- */
+
+.field { display: flex; flex-direction: column; gap: var(--s-2); }
+
+.field__label {
+  font-size: var(--t-footnote);
+  font-weight: var(--w-medium);
+  color: var(--c-text-2);
+}
+
+.input {
+  min-height: var(--touch);
+  padding: var(--s-2) var(--s-3);
+  background: var(--c-surface-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  color: var(--c-text);
+  font-size: var(--t-body);
+  /* 17px minimum stops iOS Safari zooming the viewport on focus. */
+  font-variant-numeric: tabular-nums;
+  transition: border-color var(--dur-fast) var(--ease-standard),
+              background-color var(--dur-fast) var(--ease-standard);
+  width: 100%;
+}
+
+.input:focus {
+  border-color: var(--c-accent);
+  background: var(--c-surface-2);
+}
+
+.input::placeholder { color: var(--c-text-3); }
+
+/* Strip the spinner from number inputs — thumbs, not arrows. */
+.input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+.input[type="number"]::-webkit-outer-spin-button,
+.input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+.input--num { text-align: center; font-weight: var(--w-semibold); }
+
+textarea.input { min-height: 88px; resize: vertical; line-height: var(--lh-normal); }
+
+/* Segmented control (iOS style), used for unit and theme pickers. */
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--c-surface-3);
+  border-radius: var(--r-md);
+  gap: 2px;
+  width: 100%;
+}
+
+.segmented__opt {
+  flex: 1 1 0;
+  min-height: 34px;
+  padding: 0 var(--s-3);
+  border-radius: calc(var(--r-md) - 3px);
+  font-size: var(--t-subhead);
+  font-weight: var(--w-medium);
+  color: var(--c-text-2);
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-standard),
+              color var(--dur-fast) var(--ease-standard);
+}
+
+.segmented__opt[aria-checked="true"] {
+  background: var(--c-surface-1);
+  color: var(--c-text);
+  font-weight: var(--w-semibold);
+  box-shadow: var(--shadow-sm);
+}
+
+/* --- Empty state ------------------------------------------------------ */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--s-2);
+  padding: var(--s-8) var(--s-5);
+  color: var(--c-text-2);
+}
+
+.empty__icon {
+  width: 44px;
+  height: 44px;
+  stroke: var(--c-text-3);
+  stroke-width: 1.4;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  margin-bottom: var(--s-1);
+}
+
+.empty__title {
+  font-size: var(--t-callout);
+  font-weight: var(--w-semibold);
+  color: var(--c-text);
+}
+
+.empty__text { font-size: var(--t-subhead); max-width: 34ch; }
+
+/* --- Toast ------------------------------------------------------------ */
+
+.toast-host {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--tabbar-h) + var(--safe-bottom) + var(--s-4));
+  transform: translateX(-50%);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  align-items: center;
+  pointer-events: none;
+  width: max-content;
+  max-width: calc(100vw - var(--s-8));
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  background: var(--c-surface-4);
+  border: 1px solid var(--c-hairline-firm);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--t-subhead);
+  font-weight: var(--w-medium);
+  animation: toast-in var(--dur-base) var(--ease-spring);
+}
+
+.toast--success { color: var(--c-success); }
+.toast--danger  { color: var(--c-danger); }
+
+.toast[data-leaving="true"] { animation: toast-out var(--dur-fast) var(--ease-standard) forwards; }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes toast-out {
+  to { opacity: 0; transform: translateY(6px) scale(0.98); }
+}
+
+@media (min-width: 1024px) {
+  .toast-host { bottom: var(--s-6); }
+}
+
+/* --- Divider ---------------------------------------------------------- */
+
+.divider {
+  height: 1px;
+  background: var(--c-hairline);
+  border: none;
+  margin: var(--s-4) 0;
+}
+
+/* --- Entrance animation ----------------------------------------------- */
+
+/* Applied to page content on route change. Kept to opacity + a small
+   translate so it reads as a settle, not a slide. */
+.enter { animation: enter var(--dur-base) var(--ease-standard) both; }
+
+@keyframes enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Stagger children so a list of cards resolves top-to-bottom. */
+.enter-stagger > * { animation: enter var(--dur-base) var(--ease-standard) both; }
+.enter-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.enter-stagger > *:nth-child(2) { animation-delay: 40ms; }
+.enter-stagger > *:nth-child(3) { animation-delay: 80ms; }
+.enter-stagger > *:nth-child(4) { animation-delay: 120ms; }
+.enter-stagger > *:nth-child(5) { animation-delay: 160ms; }
+.enter-stagger > *:nth-child(n + 6) { animation-delay: 200ms; }

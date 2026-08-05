@@ -1,0 +1,205 @@
+/* ==========================================================================
+   tokens.css — Design tokens
+   The single source of truth for colour, type, space, radius, shadow, motion.
+   Nothing else in the app should define a raw colour or a magic pixel value.
+   ========================================================================== */
+
+:root {
+  /* --- Palette: greyscale ------------------------------------------------
+     A near-black base with layered surfaces. Elevation is communicated by
+     lightening the surface, the way iOS dark mode does, rather than by
+     heavy borders. */
+  --c-bg:            #000000;
+  --c-surface-1:     #0e0e11;
+  --c-surface-2:     #17171c;
+  --c-surface-3:     #1f1f26;
+  --c-surface-4:     #2a2a33;
+
+  --c-hairline:      rgba(255, 255, 255, 0.09);
+  --c-hairline-firm: rgba(255, 255, 255, 0.16);
+
+  --c-text:          #f5f5f7;
+  --c-text-2:        rgba(235, 235, 245, 0.62);
+  --c-text-3:        rgba(235, 235, 245, 0.34);
+
+  /* --- Palette: accents --------------------------------------------------
+     One accent (iron blue) carries all primary actions. The rest are
+     reserved for meaning — never for decoration. */
+  --c-accent:        #0a84ff;
+  --c-accent-dim:    #0a84ff29;
+  --c-accent-text:   #ffffff;
+
+  --c-success:       #30d158;
+  --c-warning:       #ff9f0a;
+  --c-danger:        #ff453a;
+  --c-pr:            #ffd60a;   /* personal records */
+
+  --c-success-dim:   #30d15824;
+  --c-warning-dim:   #ff9f0a24;
+  --c-danger-dim:    #ff453a24;
+  --c-pr-dim:        #ffd60a24;
+
+  /* Ring / progress track */
+  --c-track:         rgba(255, 255, 255, 0.10);
+
+  /* --- Typography -------------------------------------------------------
+     System font stack: renders as SF Pro on iPhone/iPad/Mac, Segoe on
+     Windows. Zero font downloads, so the first paint is instant offline. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+               Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-num:  "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Type scale — mirrors Apple's iOS text styles */
+  --t-hero:      2.125rem;  /* 34px  large title  */
+  --t-title-1:   1.75rem;   /* 28px               */
+  --t-title-2:   1.375rem;  /* 22px               */
+  --t-title-3:   1.25rem;   /* 20px               */
+  --t-body:      1.0625rem; /* 17px  iOS body     */
+  --t-callout:   1rem;      /* 16px               */
+  --t-subhead:   0.9375rem; /* 15px               */
+  --t-footnote:  0.8125rem; /* 13px               */
+  --t-caption:   0.75rem;   /* 12px               */
+  --t-micro:     0.6875rem; /* 11px               */
+
+  --w-regular:   400;
+  --w-medium:    500;
+  --w-semibold:  600;
+  --w-bold:      700;
+
+  --lh-tight:    1.15;
+  --lh-snug:     1.3;
+  --lh-normal:   1.5;
+
+  /* Optical tightening for large text, per Apple's display faces */
+  --track-tight: -0.022em;
+  --track-wide:   0.06em;
+
+  /* --- Space — 4px base grid ------------------------------------------- */
+  --s-1:  0.25rem;   /*  4px */
+  --s-2:  0.5rem;    /*  8px */
+  --s-3:  0.75rem;   /* 12px */
+  --s-4:  1rem;      /* 16px */
+  --s-5:  1.25rem;   /* 20px */
+  --s-6:  1.5rem;    /* 24px */
+  --s-8:  2rem;      /* 32px */
+  --s-10: 2.5rem;    /* 40px */
+  --s-12: 3rem;      /* 48px */
+  --s-16: 4rem;      /* 64px */
+
+  /* --- Radius ----------------------------------------------------------- */
+  --r-sm:   8px;
+  --r-md:   12px;
+  --r-lg:   16px;
+  --r-xl:   20px;
+  --r-2xl:  26px;
+  --r-pill: 999px;
+
+  /* --- Elevation -------------------------------------------------------- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.55);
+
+  /* --- Motion ----------------------------------------------------------
+     Two easings only. `standard` for most things, `spring` for anything
+     that should feel physical (sheets, ring fills, button presses). */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring:   cubic-bezier(0.34, 1.36, 0.64, 1);
+
+  --dur-fast:   140ms;
+  --dur-base:   240ms;
+  --dur-slow:   400ms;
+
+  /* --- Layout ----------------------------------------------------------- */
+  --page-max:   720px;   /* content column on phone/iPad portrait */
+  --page-wide:  1080px;  /* desktop / iPad landscape              */
+  --tabbar-h:   56px;
+  --header-h:   52px;
+
+  /* Minimum comfortable touch target (Apple HIG: 44pt) */
+  --touch:      44px;
+
+  /* iOS safe areas — fall back to 0 where env() is unsupported */
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left, 0px);
+  --safe-right:  env(safe-area-inset-right, 0px);
+
+  /* Horizontal page gutter, grows on larger screens */
+  --gutter: var(--s-4);
+
+  /* Backdrop blur used by the header and tab bar */
+  --blur: saturate(180%) blur(20px);
+
+  --z-content: 1;
+  --z-header:  50;
+  --z-tabbar:  60;
+  --z-sheet:   80;
+  --z-toast:   90;
+}
+
+@media (min-width: 480px) {
+  :root { --gutter: var(--s-5); }
+}
+
+@media (min-width: 768px) {
+  :root { --gutter: var(--s-6); --tabbar-h: 60px; }
+}
+
+/* --- Light theme -------------------------------------------------------
+   The app ships dark-first. Light mode is a token override only: no
+   component stylesheet needs to know a theme exists. Applied when the user
+   picks Light in Settings (data-theme="light" on <html>), or when they pick
+   System and the OS reports light. */
+:root[data-theme="light"] {
+  --c-bg:            #f2f2f7;
+  --c-surface-1:     #ffffff;
+  --c-surface-2:     #ffffff;
+  --c-surface-3:     #f2f2f7;
+  --c-surface-4:     #e5e5ea;
+
+  --c-hairline:      rgba(60, 60, 67, 0.12);
+  --c-hairline-firm: rgba(60, 60, 67, 0.24);
+
+  --c-text:          #1c1c1e;
+  --c-text-2:        rgba(60, 60, 67, 0.62);
+  --c-text-3:        rgba(60, 60, 67, 0.34);
+
+  --c-accent:        #007aff;
+  --c-success:       #248a3d;
+  --c-warning:       #c93400;
+  --c-danger:        #d70015;
+  --c-pr:            #a25c00;
+
+  --c-track:         rgba(60, 60, 67, 0.12);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.12);
+}
+
+/* Honour the OS preference when the user has chosen "System".
+   app.js writes data-theme="light"/"dark" for explicit choices, so this
+   block only ever applies to the System setting. */
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    --c-bg:            #f2f2f7;
+    --c-surface-1:     #ffffff;
+    --c-surface-2:     #ffffff;
+    --c-surface-3:     #f2f2f7;
+    --c-surface-4:     #e5e5ea;
+    --c-hairline:      rgba(60, 60, 67, 0.12);
+    --c-hairline-firm: rgba(60, 60, 67, 0.24);
+    --c-text:          #1c1c1e;
+    --c-text-2:        rgba(60, 60, 67, 0.62);
+    --c-text-3:        rgba(60, 60, 67, 0.34);
+    --c-accent:        #007aff;
+    --c-success:       #248a3d;
+    --c-warning:       #c93400;
+    --c-danger:        #d70015;
+    --c-pr:            #a25c00;
+    --c-track:         rgba(60, 60, 67, 0.12);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.12);
+  }
+}

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<!--
+  tools/preview.html — Visual review harness.
+
+  Headless Chrome ignores --window-size when laying out a screenshotted page,
+  which makes it useless for checking a mobile-first design. Rendering the app
+  inside fixed-size iframes forces a genuine device-width layout, so a single
+  screenshot of this page shows all three target sizes accurately.
+
+  Open it in a normal browser too — it is the fastest way to eyeball phone,
+  tablet and desktop side by side.
+
+    http://127.0.0.1:PORT/tools/preview.html
+    http://127.0.0.1:PORT/tools/preview.html?route=workout
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>IronLog · preview</title>
+  <style>
+    body {
+      margin: 0; padding: 20px; background: #3a3a3c;
+      font: 600 12px -apple-system, "Segoe UI", system-ui, sans-serif;
+      color: #fff; display: flex; gap: 20px; align-items: flex-start;
+    }
+    figure { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+    figcaption { letter-spacing: .06em; text-transform: uppercase; opacity: .75; }
+    iframe { border: 0; border-radius: 14px; background: #000; display: block; }
+  </style>
+</head>
+<body>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const route = params.get('route') || 'home';
+
+    // ?theme=light seeds the stored setting before the frames load, so the
+    // light palette can be reviewed without clicking through Settings.
+    // Same origin as the app, so this is the same key the app reads.
+    const theme = params.get('theme');
+    if (theme) {
+      const key = 'ironlog:v1:settings';
+      const current = JSON.parse(localStorage.getItem(key) || '{}');
+      localStorage.setItem(key, JSON.stringify({ ...current, theme }));
+    }
+
+    // iPhone 15/16 logical width, iPad portrait, and a desktop column.
+    const SIZES = [
+      { label: 'iPhone · 402',  width: 402,  height: 1180 },
+      { label: 'iPad · 834',    width: 834,  height: 1180 },
+      { label: 'Desktop · 1280', width: 1280, height: 1180 },
+    ];
+
+    for (const size of SIZES) {
+      const figure = document.createElement('figure');
+
+      const caption = document.createElement('figcaption');
+      caption.textContent = size.label;
+
+      const frame = document.createElement('iframe');
+      frame.src = `../index.html#/${route}`;
+      frame.width = size.width;
+      frame.height = size.height;
+      frame.setAttribute('title', size.label);
+
+      figure.append(caption, frame);
+      document.body.appendChild(figure);
+    }
+  </script>
+</body>
+</html>

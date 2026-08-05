@@ -1,0 +1,295 @@
+/* ==========================================================================
+   layout.css — App shell: header, scroll area, tab bar, grids
+   ==========================================================================
+
+   Shell model
+   -----------
+   .app is a fixed-height flex column. Only .app-main scrolls. This is what
+   makes the header and tab bar feel native on iOS: they never travel with
+   the content, and the address bar collapse doesn't jitter them.
+
+   100dvh (dynamic viewport height) is what keeps the layout correct while
+   Safari's toolbars animate; the 100vh line above it is the fallback for
+   older WebKit.
+   ========================================================================== */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* Wraps header + main so they can sit beside the sidebar on wide screens.
+   On a phone it is transparent to layout — the desktop rule at the bottom of
+   this file turns it into a real flex column. */
+.app-shell { display: contents; }
+
+/* --- Header ----------------------------------------------------------- */
+
+.app-header {
+  position: relative;
+  z-index: var(--z-header);
+  flex: 0 0 auto;
+  padding-top: var(--safe-top);
+  /* Opaque fallback first for engines without color-mix() */
+  background: var(--c-bg);
+  background: color-mix(in srgb, var(--c-bg) 72%, transparent);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--dur-base) var(--ease-standard);
+}
+
+/* Hairline appears only once content has scrolled beneath the header. */
+.app-header[data-scrolled="true"] { border-bottom-color: var(--c-hairline); }
+
+.app-header__inner {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: var(--header-h);
+  padding: 0 var(--gutter);
+  padding-left: max(var(--gutter), var(--safe-left));
+  padding-right: max(var(--gutter), var(--safe-right));
+  max-width: var(--page-wide);
+  margin: 0 auto;
+  width: 100%;
+}
+
+.app-header__title {
+  font-size: var(--t-title-3);
+  font-weight: var(--w-bold);
+  letter-spacing: var(--track-tight);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.app-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex: 0 0 auto;
+}
+
+/* --- Scrolling content ------------------------------------------------ */
+
+.app-main {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  /* Stops a scroll gesture at the end of the list from dragging the page */
+  overscroll-behavior-y: contain;
+  position: relative;
+  z-index: var(--z-content);
+}
+
+.page {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: var(--s-5) var(--gutter);
+  /* Clear the tab bar plus the home-indicator inset, so the last card is
+     never trapped underneath it. */
+  padding-bottom: calc(var(--tabbar-h) + var(--safe-bottom) + var(--s-8));
+  padding-left: max(var(--gutter), var(--safe-left));
+  padding-right: max(var(--gutter), var(--safe-right));
+}
+
+/* Vertical rhythm between page sections. */
+.page > * + * { margin-top: var(--s-6); }
+
+.section__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+  padding: 0 var(--s-1);
+}
+
+/* --- Tab bar ---------------------------------------------------------- */
+
+.tabbar {
+  position: relative;
+  z-index: var(--z-tabbar);
+  flex: 0 0 auto;
+  padding-bottom: var(--safe-bottom);
+  background: var(--c-bg);
+  background: color-mix(in srgb, var(--c-bg) 80%, transparent);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border-top: 1px solid var(--c-hairline);
+}
+
+.tabbar__inner {
+  display: flex;
+  max-width: var(--page-wide);
+  margin: 0 auto;
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+.tab {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: var(--tabbar-h);
+  padding: var(--s-1) var(--s-1);
+  color: var(--c-text-3);
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  letter-spacing: 0;
+  transition: color var(--dur-fast) var(--ease-standard);
+}
+
+.tab__icon {
+  width: 26px;
+  height: 26px;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--dur-base) var(--ease-spring);
+}
+
+.tab[aria-current="page"] { color: var(--c-accent); }
+.tab[aria-current="page"] .tab__icon { transform: translateY(-1px) scale(1.04); }
+
+/* Pointer devices only — avoids a sticky hover state after a tap on iOS. */
+@media (hover: hover) {
+  .tab:hover { color: var(--c-text-2); }
+  .tab[aria-current="page"]:hover { color: var(--c-accent); }
+}
+
+.tab:active .tab__icon { transform: scale(0.9); }
+
+/* --- Grids ------------------------------------------------------------ */
+
+.grid {
+  display: grid;
+  gap: var(--s-3);
+}
+
+.grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* Auto-fitting grid for stat tiles: as many columns as fit at >=140px. */
+.grid--auto {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.row--between { justify-content: space-between; }
+.row--wrap { flex-wrap: wrap; }
+.spacer { flex: 1 1 auto; }
+
+/* --- Responsive ------------------------------------------------------- */
+
+/* iPad portrait and up: a wider reading column. */
+@media (min-width: 768px) {
+  .page { max-width: var(--page-max); padding-top: var(--s-6); }
+}
+
+/* Desktop / iPad landscape: move navigation to a persistent sidebar. The
+   tab bar is a phone pattern; on a wide screen it wastes the bottom edge
+   and puts targets far from the pointer. */
+@media (min-width: 1024px) {
+  .app { flex-direction: row; }
+
+  .tabbar {
+    order: -1;
+    flex: 0 0 232px;
+    border-top: none;
+    border-right: 1px solid var(--c-hairline);
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+    background: var(--c-surface-1);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .tabbar__inner {
+    flex-direction: column;
+    gap: var(--s-1);
+    padding: var(--s-5) var(--s-3);
+    height: 100%;
+  }
+
+  .tab {
+    flex: 0 0 auto;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: var(--s-3);
+    min-height: var(--touch);
+    padding: 0 var(--s-3);
+    border-radius: var(--r-md);
+    font-size: var(--t-callout);
+    font-weight: var(--w-medium);
+    transition: color var(--dur-fast) var(--ease-standard),
+                background-color var(--dur-fast) var(--ease-standard);
+  }
+
+  .tab__icon { width: 22px; height: 22px; }
+
+  .tab[aria-current="page"] {
+    background: var(--c-accent-dim);
+    color: var(--c-accent);
+  }
+
+  .tab[aria-current="page"] .tab__icon { transform: none; }
+
+  @media (hover: hover) {
+    .tab:hover { background: var(--c-surface-3); color: var(--c-text); }
+    .tab[aria-current="page"]:hover { background: var(--c-accent-dim); color: var(--c-accent); }
+  }
+
+  /* The shell splits into sidebar + column, so header/main live together. */
+  .app-shell {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+  }
+
+  /* A comfortable reading measure, not the full window. Cards stretched to
+     1200px read as a web page; this keeps the app feeling like an app. */
+  .page {
+    max-width: 860px;
+    margin: 0;
+    padding-left: var(--s-8);
+    padding-right: var(--s-8);
+    padding-bottom: var(--s-12);
+  }
+
+  /* Settings already has a permanent sidebar row, so the header shortcut is
+     redundant duplication on desktop. */
+  .app-header__actions { display: none; }
+}
+
+/* Full-width buttons are right on a phone, where the thumb needs the whole
+   edge. Past tablet width they turn into a 700px slab, so the primary action
+   is capped and centred instead. */
+@media (min-width: 768px) {
+  .btn--block.btn--lg {
+    max-width: 340px;
+    margin-inline: auto;
+  }
+}

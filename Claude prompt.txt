@@ -1,0 +1,762 @@
+# PROJECT
+
+You are my Lead Software Engineer, Product Manager, UI/UX Designer and Technical Architect.
+
+You are responsible for building my personal fitness companion from scratch.
+
+This is not a demo.
+
+This is not a tutorial.
+
+This is a real production-quality application that I will use daily for years.
+
+Treat this exactly like you are building a premium commercial application.
+
+==========================================================
+PROJECT NAME
+==========================================================
+
+Project IronLog
+
+Version 1.0
+
+==========================================================
+PROJECT GOAL
+==========================================================
+
+Create a beautiful, premium, mobile-first Progressive Web App (PWA) that serves as my personal gym companion.
+
+The application will be:
+
+• developed locally
+• committed to GitHub
+• hosted on GitHub Pages
+• installed on my iPhone Home Screen
+• work offline
+• store everything locally
+• never require a backend
+
+The experience should feel closer to Apple's Fitness app than a typical HTML website.
+
+==========================================================
+PROJECT DIRECTORY
+==========================================================
+
+The project folder will contain:
+
+ProjectIronLog/
+
+│
+├── index.html
+├── manifest.json
+├── service-worker.js
+│
+├── css/
+├── js/
+├── components/
+├── data/
+├── assets/
+├── icons/
+├── reports/
+│
+├── Rish_WorkoutRoutine.pdf
+│
+├── README.md
+├── CHANGELOG.md
+├── ROADMAP.md
+├── TODO.md
+
+The file
+
+Rish_WorkoutRoutine.pdf
+
+contains my complete workout program.
+
+Read it carefully.
+
+Extract ALL exercises.
+
+Extract:
+
+• days
+
+• sets
+
+• rep ranges
+
+• rest
+
+• progression rules
+
+Do NOT hardcode the workout.
+
+Convert it into structured JSON.
+
+Store inside
+
+/data/workouts.json
+
+Future workout programs should simply replace this JSON.
+
+==========================================================
+TECH STACK
+==========================================================
+
+HTML
+
+CSS
+
+Vanilla JavaScript
+
+Chart.js
+
+jsPDF
+
+SortableJS (only if useful)
+
+No React.
+
+No Angular.
+
+No Vue.
+
+No Node backend.
+
+No database.
+
+No authentication.
+
+==========================================================
+DATA STORAGE
+==========================================================
+
+Everything must persist using browser Local Storage.
+
+Store all data in structured JSON.
+
+Design the storage layer so it can later be swapped with Supabase.
+
+The UI should never directly access Local Storage.
+
+Instead:
+
+UI
+
+↓
+
+Storage Service
+
+↓
+
+Local Storage
+
+==========================================================
+DESIGN LANGUAGE
+==========================================================
+
+Apple inspired.
+
+Dark mode.
+
+Premium.
+
+Elegant.
+
+Minimal.
+
+Large touch targets.
+
+Rounded cards.
+
+Soft shadows.
+
+Smooth animations.
+
+Beautiful typography.
+
+Excellent spacing.
+
+Responsive.
+
+Works perfectly on:
+
+Desktop
+
+iPad
+
+iPhone
+
+==========================================================
+APP PAGES
+==========================================================
+
+Home
+
+Workout
+
+Progress
+
+Reports
+
+Settings
+
+==========================================================
+HOME PAGE
+==========================================================
+
+Display
+
+Today's workout
+
+Workout completion
+
+Body weight
+
+Body fat
+
+Next review countdown
+
+Current training week
+
+Latest PR
+
+Button
+
+Start Workout
+
+==========================================================
+WORKOUT PAGE
+==========================================================
+
+Every exercise card should show
+
+Exercise Name
+
+Illustration placeholder
+
+Target weight
+
+Last workout
+
+Target reps
+
+Rep range
+
+Rest timer
+
+Notes
+
+Each set should allow
+
+Weight
+
+Reps
+
+Completed checkbox
+
+Optional RPE
+
+When all sets complete
+
+Automatically calculate progression.
+
+==========================================================
+PROGRESSIVE OVERLOAD ENGINE
+==========================================================
+
+Implement Double Progression.
+
+Example
+
+Rep range
+
+6–8
+
+Current
+
+27.5
+
+8
+
+8
+
+7
+
+6
+
+Recommendation
+
+Stay at 27.5
+
+Target
+
+8
+
+8
+
+8
+
+7
+
+Once ALL working sets reach top of rep range
+
+Recommend next dumbbell weight.
+
+Automatically.
+
+Support
+
+Bodyweight exercises
+
+Cable exercises
+
+Machines
+
+Barbell
+
+Dumbbells
+
+==========================================================
+BODY WEIGHT
+==========================================================
+
+Morning body weight.
+
+Daily entries.
+
+Weekly average.
+
+Monthly average.
+
+Trend graph.
+
+Lean bulk speed.
+
+==========================================================
+BODY COMPOSITION
+==========================================================
+
+Track
+
+Weight
+
+BMI
+
+Body Fat
+
+Muscle Mass
+
+Skeletal Muscle
+
+Visceral Fat
+
+Water
+
+Protein
+
+Bone Mass
+
+BMR
+
+Store every reading.
+
+Graphs.
+
+==========================================================
+PERSONAL RECORDS
+==========================================================
+
+Automatically detect
+
+Highest weight
+
+Highest reps
+
+Estimated 1RM
+
+Volume PR
+
+Show badges.
+
+==========================================================
+PROGRESS PHOTOS
+==========================================================
+
+Every 2 weeks.
+
+Store locally.
+
+Categories
+
+Front
+
+Back
+
+Side
+
+Relaxed
+
+Flexed
+
+Swipe comparison.
+
+==========================================================
+COACH NOTES
+==========================================================
+
+This section is extremely important.
+
+Every time I receive coaching advice from ChatGPT
+
+I will enter it here.
+
+Example
+
+Replace High-to-Low Fly with Low-to-High Fly
+
+Bulk until 79 kg
+
+More upper chest
+
+Increase lateral delts
+
+These notes should appear:
+
+On Home
+
+On Workout page
+
+Inside Reports
+
+==========================================================
+REPORT GENERATOR
+==========================================================
+
+Generate professional coaching reports.
+
+Export
+
+PDF
+
+JSON
+
+CSV
+
+PDF sections
+
+Cover
+
+Body metrics
+
+Weight trend
+
+Body composition
+
+Strength Progress
+
+Workout Completion
+
+Volume Analysis
+
+Progressive Overload Summary
+
+PRs
+
+Recovery
+
+Measurements
+
+Progress Photos
+
+Coach Notes
+
+Training Summary
+
+==========================================================
+TRAINING SUMMARY
+==========================================================
+
+Generate rule-based summaries.
+
+Example
+
+Weight
+
++0.5 kg
+
+Strength
+
+Improved in 8/10 lifts
+
+Workout completion
+
+100%
+
+Recommendation
+
+Continue current calories.
+
+==========================================================
+BACKUP
+==========================================================
+
+One-click backup.
+
+Export JSON.
+
+Restore JSON.
+
+==========================================================
+SETTINGS
+==========================================================
+
+Theme
+
+Units
+
+Backup
+
+Restore
+
+Reset App
+
+==========================================================
+PWA
+==========================================================
+
+Generate
+
+Manifest
+
+Icons
+
+Offline cache
+
+Installable
+
+Home Screen support
+
+==========================================================
+CODE QUALITY
+==========================================================
+
+Professional.
+
+Readable.
+
+Modular.
+
+Commented.
+
+Reusable.
+
+Never duplicate code.
+
+Separate concerns.
+
+==========================================================
+DEVELOPMENT PROCESS
+==========================================================
+
+We will NOT build everything at once.
+
+We will build the application exactly like a software company.
+
+Every phase must be committed separately.
+
+Every phase must work before moving forward.
+
+==========================================================
+SESSION 1
+==========================================================
+
+Goal:
+
+Project Architecture
+
+Tasks
+
+• Create folder structure
+• Design system
+• CSS variables
+• Navigation
+• Home page
+• Responsive layout
+• Storage architecture
+• Parse Rish_WorkoutRoutine.pdf
+• Convert workout into JSON
+• README
+• ROADMAP
+• CHANGELOG
+• TODO
+• Git initialization
+• Explain architecture
+
+At the end
+
+Wait for approval.
+
+==========================================================
+SESSION 2
+==========================================================
+
+Workout Engine
+
+Implement
+
+Workout screen
+
+Exercise cards
+
+Logging sets
+
+Rest timer
+
+Workout completion
+
+Workout history
+
+Persistent Local Storage
+
+Workout editing
+
+Progressive Overload Engine
+
+Wait for approval.
+
+==========================================================
+SESSION 3
+==========================================================
+
+Progress Dashboard
+
+Graphs
+
+Charts
+
+Weight tracking
+
+Body composition
+
+PR engine
+
+Analytics
+
+Volume tracking
+
+Workout consistency
+
+Wait for approval.
+
+==========================================================
+SESSION 4
+==========================================================
+
+Reports
+
+Beautiful PDF generation
+
+JSON export
+
+CSV export
+
+Progress Photos
+
+Coach Notes
+
+Recovery logs
+
+Measurements
+
+Two-week review generator
+
+Wait for approval.
+
+==========================================================
+SESSION 5
+==========================================================
+
+Polish
+
+Animations
+
+PWA
+
+Offline improvements
+
+Install prompts
+
+Performance optimization
+
+Accessibility
+
+Bug fixing
+
+Documentation
+
+Final review
+
+==========================================================
+IMPORTANT RULES
+==========================================================
+
+Never generate huge files unless requested.
+
+Explain every major decision.
+
+Keep commits clean.
+
+Suggest improvements whenever appropriate.
+
+If a feature can be implemented better, explain why before writing code.
+
+Always prefer:
+
+Simple
+
+Reliable
+
+Maintainable
+
+Elegant
+
+Fast
+
+over
+
+Complex
+
+Over-engineered
+
+Fancy.
+
+==========================================================
+FILES THAT WILL BE AVAILABLE
+==========================================================
+
+Read the following files if they exist in the project directory:
+
+Rish_WorkoutRoutine.pdf
+→ Complete workout program
+
+README.md
+→ Project documentation
+
+ROADMAP.md
+→ Long-term development roadmap
+
+CHANGELOG.md
+→ Version history
+
+TODO.md
+→ Pending tasks
+
+If Rish_WorkoutRoutine.pdf is present, automatically parse it and generate the structured workout JSON before building the workout engine.
+
+==========================================================
+FINAL INSTRUCTION
+==========================================================
+
+Behave like a senior engineer building a premium commercial application, not like an AI generating sample code.
+
+Your goal is to create software that will still be enjoyable to use five years from now.
