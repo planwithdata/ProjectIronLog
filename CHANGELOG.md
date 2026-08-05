@@ -4,6 +4,63 @@ All notable changes to Project IronLog. Follows [Semantic Versioning](https://se
 
 ---
 
+## [1.6.0] — 2026-08-05 — Exercise illustrations
+
+### Added
+
+**Real artwork for all 37 exercises**, two frames each — start and end position.
+One still of a movement says almost nothing; a pair reads as a sequence.
+
+- Source: the [Free Exercise DB](https://github.com/yuhonas/free-exercise-db),
+  released into the public domain under the Unlicense. Chosen over the images
+  embedded in the source PDF, which are third-party photo collages, three
+  photos per card, with the detail text cropped off — and over hotlinking, which
+  would mean no pictures in a basement gym.
+- Downscaled to 440px and re-encoded as WebP: 74 images, **0.96 MB total**
+  (WebP was 36% smaller than JPEG at the same quality).
+- **Not precached.** Adding ~1 MB to the first install for pictures the user may
+  never scroll to is the wrong trade. The service worker's cache-first handler
+  stores each image the first time it is actually shown, so it is offline from
+  then on — and artwork is now exempt from stale-while-revalidate, since it
+  never changes without its filename changing.
+- Paths are derived by convention from the exercise id, so program data carries
+  no asset bookkeeping and a missing image falls back to the placeholder on its
+  own.
+- Tapping the illustration opens both frames full width with the form cues —
+  the card version is big enough to identify a movement, not to check a
+  position against.
+- Provenance and the full mapping are recorded in
+  `assets/exercises/CREDITS.md`.
+
+### Matching was verified, not trusted
+
+`tools/match_exercises.py` matched all 37 by alias and fuzzy name, then the
+results were rendered as a contact sheet and looked at. Three were wrong in ways
+no name check would catch — and a picture of the wrong movement is worse than no
+picture:
+
+| Exercise | Matched to | Actually showed |
+|---|---|---|
+| Ab Wheel Rollout | "Ab Roller" | a dumbbell plank |
+| Cable Lateral Raise | "Cable Seated Lateral Raise" | a bent-over *rear* delt raise |
+| Neutral Grip Lat Pulldown | "V-Bar Pulldown" | a standing pull, not seated |
+
+All three were re-pointed. Two remaining compromises are documented rather than
+hidden: Cable Lateral Raise shares the dumbbell artwork (the only cable options
+in the dataset are both rear-delt movements — wrong implement, right movement),
+and Bulgarian Split Squat shows a dumbbell split squat with the rear foot on the
+floor rather than elevated.
+
+### Tooling
+
+- `tools/match_exercises.py` — maps program exercises to the dataset, with an
+  explicit alias table, and reports what it could not match rather than
+  guessing.
+- `tools/fetch_illustrations.py` — fetches, downscales, re-encodes, and writes
+  `CREDITS.md` plus a manifest. Idempotent: existing files are left alone.
+
+---
+
 ## [1.5.0] — 2026-08-05 — Pyramid sets, goal weight, deploy hardening
 
 ### Added

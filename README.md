@@ -27,17 +27,19 @@ talks to a server.
 | Two-week review generator | Done — rule-based, traceable |
 | Install & update prompts | Done |
 | Accessibility | Done — audit clean in both themes, all nine routes |
+| Exercise illustrations | Done — start/end frames for all 37 |
 | Performance | Done — 202 KB shell, lazy route modules |
 
 ### By the numbers
 
 | | |
 |---|---|
-| Shell payload | 202 KB (31 requests) · first paint ~70 ms locally |
+| Shell payload | 243 KB cold (31 requests, incl. the 35 KB program file) · first paint ~70 ms locally |
 | Engine tests | 62 assertions (`node --test tools/`) |
 | Integration tests | 84 assertions (`tools/e2e.html`) |
 | Accessibility audit | clean, both themes, all nine routes |
 | Dependencies | 2, both vendored: Chart.js 4.5.1, jsPDF 3.0.1 |
+| Illustrations | 74 images, 0.96 MB, public domain, lazy-loaded |
 | Build step | none |
 
 ---

@@ -1,0 +1,261 @@
+{
+  "ab-wheel-rollout": {
+    "frames": [
+      "ab-wheel-rollout-1.webp",
+      "ab-wheel-rollout-2.webp"
+    ],
+    "source": "Barbell Ab Rollout - On Knees"
+  },
+  "back-squat": {
+    "frames": [
+      "back-squat-1.webp",
+      "back-squat-2.webp"
+    ],
+    "source": "Barbell Squat"
+  },
+  "bulgarian-split-squat": {
+    "frames": [
+      "bulgarian-split-squat-1.webp",
+      "bulgarian-split-squat-2.webp"
+    ],
+    "source": "Split Squat with Dumbbells"
+  },
+  "cable-crunch": {
+    "frames": [
+      "cable-crunch-1.webp",
+      "cable-crunch-2.webp"
+    ],
+    "source": "Cable Crunch"
+  },
+  "cable-lateral-raise": {
+    "frames": [
+      "cable-lateral-raise-1.webp",
+      "cable-lateral-raise-2.webp"
+    ],
+    "source": "Side Lateral Raise"
+  },
+  "chest-supported-row": {
+    "frames": [
+      "chest-supported-row-1.webp",
+      "chest-supported-row-2.webp"
+    ],
+    "source": "Leverage Iso Row"
+  },
+  "dumbbell-lateral-raise": {
+    "frames": [
+      "dumbbell-lateral-raise-1.webp",
+      "dumbbell-lateral-raise-2.webp"
+    ],
+    "source": "Side Lateral Raise"
+  },
+  "ez-bar-curl": {
+    "frames": [
+      "ez-bar-curl-1.webp",
+      "ez-bar-curl-2.webp"
+    ],
+    "source": "EZ-Bar Curl"
+  },
+  "ez-bar-skull-crusher": {
+    "frames": [
+      "ez-bar-skull-crusher-1.webp",
+      "ez-bar-skull-crusher-2.webp"
+    ],
+    "source": "EZ-Bar Skullcrusher"
+  },
+  "face-pull": {
+    "frames": [
+      "face-pull-1.webp",
+      "face-pull-2.webp"
+    ],
+    "source": "Face Pull"
+  },
+  "flat-dumbbell-bench-press": {
+    "frames": [
+      "flat-dumbbell-bench-press-1.webp",
+      "flat-dumbbell-bench-press-2.webp"
+    ],
+    "source": "Dumbbell Bench Press"
+  },
+  "hammer-curl": {
+    "frames": [
+      "hammer-curl-1.webp",
+      "hammer-curl-2.webp"
+    ],
+    "source": "Hammer Curls"
+  },
+  "hanging-knee-raise": {
+    "frames": [
+      "hanging-knee-raise-1.webp",
+      "hanging-knee-raise-2.webp"
+    ],
+    "source": "Hanging Leg Raise"
+  },
+  "hip-thrust": {
+    "frames": [
+      "hip-thrust-1.webp",
+      "hip-thrust-2.webp"
+    ],
+    "source": "Barbell Hip Thrust"
+  },
+  "incline-dumbbell-curl": {
+    "frames": [
+      "incline-dumbbell-curl-1.webp",
+      "incline-dumbbell-curl-2.webp"
+    ],
+    "source": "Incline Dumbbell Curl"
+  },
+  "incline-dumbbell-press": {
+    "frames": [
+      "incline-dumbbell-press-1.webp",
+      "incline-dumbbell-press-2.webp"
+    ],
+    "source": "Incline Dumbbell Press"
+  },
+  "incline-smith-machine-press": {
+    "frames": [
+      "incline-smith-machine-press-1.webp",
+      "incline-smith-machine-press-2.webp"
+    ],
+    "source": "Smith Machine Incline Bench Press"
+  },
+  "leg-extension": {
+    "frames": [
+      "leg-extension-1.webp",
+      "leg-extension-2.webp"
+    ],
+    "source": "Leg Extensions"
+  },
+  "leg-press": {
+    "frames": [
+      "leg-press-1.webp",
+      "leg-press-2.webp"
+    ],
+    "source": "Leg Press"
+  },
+  "low-to-high-cable-fly": {
+    "frames": [
+      "low-to-high-cable-fly-1.webp",
+      "low-to-high-cable-fly-2.webp"
+    ],
+    "source": "Low Cable Crossover"
+  },
+  "lying-leg-curl": {
+    "frames": [
+      "lying-leg-curl-1.webp",
+      "lying-leg-curl-2.webp"
+    ],
+    "source": "Lying Leg Curls"
+  },
+  "machine-chest-press": {
+    "frames": [
+      "machine-chest-press-1.webp",
+      "machine-chest-press-2.webp"
+    ],
+    "source": "Machine Bench Press"
+  },
+  "machine-shoulder-press": {
+    "frames": [
+      "machine-shoulder-press-1.webp",
+      "machine-shoulder-press-2.webp"
+    ],
+    "source": "Machine Shoulder (Military) Press"
+  },
+  "neutral-grip-lat-pulldown": {
+    "frames": [
+      "neutral-grip-lat-pulldown-1.webp",
+      "neutral-grip-lat-pulldown-2.webp"
+    ],
+    "source": "Close-Grip Front Lat Pulldown"
+  },
+  "one-arm-cable-row": {
+    "frames": [
+      "one-arm-cable-row-1.webp",
+      "one-arm-cable-row-2.webp"
+    ],
+    "source": "Seated One-arm Cable Pulley Rows"
+  },
+  "overhead-rope-extension": {
+    "frames": [
+      "overhead-rope-extension-1.webp",
+      "overhead-rope-extension-2.webp"
+    ],
+    "source": "Cable Rope Overhead Triceps Extension"
+  },
+  "pallof-press": {
+    "frames": [
+      "pallof-press-1.webp",
+      "pallof-press-2.webp"
+    ],
+    "source": "Pallof Press"
+  },
+  "pull-ups": {
+    "frames": [
+      "pull-ups-1.webp",
+      "pull-ups-2.webp"
+    ],
+    "source": "Pullups"
+  },
+  "reverse-pec-deck": {
+    "frames": [
+      "reverse-pec-deck-1.webp",
+      "reverse-pec-deck-2.webp"
+    ],
+    "source": "Reverse Machine Flyes"
+  },
+  "romanian-deadlift": {
+    "frames": [
+      "romanian-deadlift-1.webp",
+      "romanian-deadlift-2.webp"
+    ],
+    "source": "Romanian Deadlift"
+  },
+  "rope-triceps-pushdown": {
+    "frames": [
+      "rope-triceps-pushdown-1.webp",
+      "rope-triceps-pushdown-2.webp"
+    ],
+    "source": "Triceps Pushdown - Rope Attachment"
+  },
+  "seated-cable-row": {
+    "frames": [
+      "seated-cable-row-1.webp",
+      "seated-cable-row-2.webp"
+    ],
+    "source": "Seated Cable Rows"
+  },
+  "seated-calf-raise": {
+    "frames": [
+      "seated-calf-raise-1.webp",
+      "seated-calf-raise-2.webp"
+    ],
+    "source": "Seated Calf Raise"
+  },
+  "standing-calf-raise": {
+    "frames": [
+      "standing-calf-raise-1.webp",
+      "standing-calf-raise-2.webp"
+    ],
+    "source": "Standing Calf Raises"
+  },
+  "straight-arm-pulldown": {
+    "frames": [
+      "straight-arm-pulldown-1.webp",
+      "straight-arm-pulldown-2.webp"
+    ],
+    "source": "Straight-Arm Pulldown"
+  },
+  "walking-lunges": {
+    "frames": [
+      "walking-lunges-1.webp",
+      "walking-lunges-2.webp"
+    ],
+    "source": "Dumbbell Lunges"
+  },
+  "wide-grip-lat-pulldown": {
+    "frames": [
+      "wide-grip-lat-pulldown-1.webp",
+      "wide-grip-lat-pulldown-2.webp"
+    ],
+    "source": "Wide-Grip Lat Pulldown"
+  }
+}

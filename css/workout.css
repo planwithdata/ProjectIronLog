@@ -222,8 +222,51 @@
   border-top: 1px solid var(--c-hairline);
 }
 
-/* Illustration placeholder — see TODO.md on why there is no artwork yet. */
-.ex-card__art {
+/* --- Exercise illustration ---------------------------------------------
+   Two frames, start and end, side by side. A single still of a movement says
+   almost nothing; a pair reads as a sequence.
+   ====================================================================== */
+
+.ex-art {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  /* A 2px surface gap separates the frames without drawing a border round
+     either one. */
+  gap: 2px;
+  width: 100%;
+  margin-top: var(--s-3);
+  padding: 0;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--c-surface-3);
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+.ex-art:active { transform: scale(0.99); }
+
+.ex-art__frame {
+  width: 100%;
+  height: auto;
+  /* Matches the 440x294 source, so the box is reserved before the image
+     arrives and the card never reflows as artwork loads in. */
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+  display: block;
+  background: var(--c-surface-3);
+}
+
+/* The photographs are shot on bright gym backdrops, which is loud against a
+   near-black card. A slight knock-down settles them into the surface without
+   making the movement harder to read. Left alone in light mode. */
+.ex-art__frame { filter: saturate(0.9) brightness(0.94); }
+:root[data-theme="light"] .ex-art__frame { filter: none; }
+
+@media (hover: hover) {
+  .ex-art:hover .ex-art__frame { filter: none; }
+}
+
+/* Shown when an exercise has no artwork on disk. */
+.ex-art__fallback {
   display: flex;
   align-items: center;
   justify-content: center;

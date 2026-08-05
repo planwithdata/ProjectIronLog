@@ -29,10 +29,14 @@ wish-list. `ROADMAP.md` holds the post-1.0 candidates.
 
 ## Known limitations
 
-- [ ] **Exercise illustrations are placeholders.** The source PDF contains
-      third-party photo collages, three images per card, with the detail text
-      cropped out — not usable as per-exercise artwork. Needs licensed art or
-      hand-drawn SVGs. The card layout already reserves the slot.
+- [ ] **Two illustrations are approximations**, both recorded in
+      `assets/exercises/CREDITS.md`. Cable Lateral Raise shares the dumbbell
+      artwork, because the only cable lateral raises in the public-domain
+      dataset are bent-over rear-delt movements — wrong implement, right
+      movement, which is what an illustration is for. Bulgarian Split Squat
+      shows the rear foot on the floor rather than elevated. Replace either by
+      dropping `assets/exercises/<id>-1.webp` and `-2.webp` in; nothing else
+      needs changing.
 - [ ] **A JSON backup does not contain photo images.** Photos live in
       IndexedDB, deliberately — base64 in Local Storage would exhaust the
       quota within about two months. Bundling 40 MB of base64 into the backup

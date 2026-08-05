@@ -32,6 +32,7 @@ import * as prService from '../services/pr-service.js';
 import * as restTimer from '../services/rest-timer.js';
 import { actionLabel, repRange, incrementFor, earnedAdvance } from '../engine/progression.js';
 import { setRow } from '../../components/set-row.js';
+import { exerciseArt } from '../../components/exercise-art.js';
 import { mountRestBar } from '../../components/rest-bar.js';
 import { openSheet, confirmSheet, sheetRow } from '../../components/sheet.js';
 import { sectionHead, emptyState } from '../../components/stat.js';
@@ -185,10 +186,7 @@ function browseCard(exercise, day, wave) {
 
   return el('article.card', {}, [
     exerciseHead(exercise),
-    el('div.ex-card__art', { 'aria-hidden': 'true' }, [
-      icon('dumbbell', { size: 20 }),
-      el('span.t-caption', { text: 'Illustration' }),
-    ]),
+    exerciseArt(exercise),
 
     el('div.ex-card__meta', {}, [
       metaPill('Sets', String(sets)),
@@ -279,6 +277,7 @@ function loggingCard(exercise, session, wave) {
   // a null child into the literal text "null".
   append(card, [
     exerciseHead(exercise, entry),
+    exerciseArt(exercise),
     el('div.ex-card__meta', {}, [
       metaPill('Reps', exercise.reps.label),
       metaPill('Rest', exercise.rest.label),

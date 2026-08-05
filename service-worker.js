@@ -23,8 +23,16 @@
  * service worker runs outside the module graph and cannot import it.
  */
 
-const CACHE_VERSION = 'v1.5.0';
+const CACHE_VERSION = 'v1.6.0';
 const CACHE_NAME = `ironlog-${CACHE_VERSION}`;
+
+/**
+ * Content that is versioned by filename. Cached on first view and never
+ * revalidated. Exercise artwork is deliberately absent from PRECACHE below:
+ * 74 images would add ~1 MB to the first install for pictures the user may
+ * never scroll to, and this handler caches each one as it is actually shown.
+ */
+const IMMUTABLE = /\/assets\/exercises\/.+\.webp$/;
 
 /**
  * Paths are relative to the service worker's own scope, so the app works
@@ -162,10 +170,12 @@ async function cacheFirst(request) {
   const cached = await cache.match(request, { ignoreSearch: false });
 
   if (cached) {
-    // Stale-while-revalidate: the user gets an instant response, and the
-    // cache is refreshed for the next load. Failures are ignored — being
-    // offline is the expected case, not an error.
-    refresh(cache, request);
+    // Exercise artwork never changes without its filename changing, so
+    // revalidating it on every view is pure waste on a phone connection.
+    // Everything else gets stale-while-revalidate: an instant response now,
+    // a fresh copy for next time. Failures are ignored — being offline is the
+    // expected case here, not an error.
+    if (!IMMUTABLE.test(new URL(request.url).pathname)) refresh(cache, request);
     return cached;
   }
 

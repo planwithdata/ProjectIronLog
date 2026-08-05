@@ -19,6 +19,7 @@ desktop.ini
 .pdfimgs/
 pdf_dump.txt
 docx_dump.txt
+tools/exercise-image-map.json
 
 # Generated reports (exports land here at the user's choosing)
 reports/*
