@@ -17,6 +17,10 @@
       "everyDays": 14,
       "label": "Two-week review"
     },
+    "goals": {
+      "bodyWeightKg": 85,
+      "note": "Lean bulk target. Settings > Profile takes precedence if a goal is entered there."
+    },
     "wave": {
       "loadingWeeks": 4,
       "deloadWeek": 5,
@@ -609,11 +613,16 @@
           "primaryMuscles": ["Side delts"],
           "secondaryMuscles": [],
           "sets": 3,
-          "reps": { "min": 12, "max": 15, "perSide": true, "label": "12-15/side" },
+          "reps": { "min": 8, "max": 12, "perSide": true, "label": "12/10/8" },
+          "setPlan": [
+            { "weightKg": 10, "reps": 12 },
+            { "weightKg": 15, "reps": 10 },
+            { "weightKg": 20, "reps": 8 }
+          ],
           "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
           "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
           "cues": ["Cable behind the body, lead with the elbow.", "Constant tension - no swinging."],
-          "notes": "Added to increase lateral delt volume."
+          "notes": "Ascending ladder: 10 kg x 12, 15 kg x 10, 20 kg x 8. Each rung progresses on its own; the whole ladder moves up once every rung hits its target."
         },
         {
           "id": "reverse-pec-deck",

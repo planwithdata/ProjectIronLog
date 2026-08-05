@@ -207,7 +207,7 @@ function weightSection({ days, endKey, units }) {
   const trend = analytics.weightTrend(days, endKey);
   if (!trend.daily.length) return null;
 
-  const profile = settingsService.getProfile();
+  const goalKg = settingsService.getGoalWeightKg();
   const latest = bodyService.getLatestWeight();
   const weekly = bodyService.getWeeklyAverage(endKey);
   const monthly = bodyService.getMonthlyAverage(endKey);
@@ -248,10 +248,10 @@ function weightSection({ days, endKey, units }) {
         showPoints: true,
       },
     ],
-    reference: profile.goalWeightKg
+    reference: goalKg
       ? {
-          value: displayWeight(profile.goalWeightKg, units),
-          label: `Goal ${trimNumber(displayWeight(profile.goalWeightKg, units), 1)} ${units}`,
+          value: displayWeight(goalKg, units),
+          label: `Goal ${trimNumber(displayWeight(goalKg, units), 1)} ${units}`,
         }
       : null,
     formatValue: (value) => trimNumber(value, 1),

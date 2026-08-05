@@ -236,13 +236,10 @@ function bodyStats() {
   const bodyFat = bodyService.getLatestField('bodyFatPercent');
   const rate = bodyService.getLeanBulkRate();
   const review = programService.getReviewCountdown();
-  const profile = settingsService.getProfile();
+  const goalKg = settingsService.getGoalWeightKg();
 
-  // Distance to the goal weight, when one has been set — the number the
-  // lean-bulk decision actually turns on.
-  const toGoal = latestWeight && profile.goalWeightKg
-    ? profile.goalWeightKg - latestWeight.weightKg
-    : null;
+  // Distance to the goal weight — the number the lean-bulk decision turns on.
+  const toGoal = latestWeight && goalKg ? goalKg - latestWeight.weightKg : null;
 
   return el('section', {}, [
     sectionHead('Body', { hint: latestWeight ? relativeDay(latestWeight.date) : null }),
@@ -266,7 +263,7 @@ function bodyStats() {
       stat({
         label: toGoal === null ? 'Goal weight' : 'To goal',
         value: toGoal === null
-          ? (profile.goalWeightKg ? trimNumber(displayWeight(profile.goalWeightKg, units), 1) : null)
+          ? (goalKg ? trimNumber(displayWeight(goalKg, units), 1) : null)
           : trimNumber(Math.abs(displayWeight(toGoal, units)), 1),
         unit: units,
         foot: toGoal === null

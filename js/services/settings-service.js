@@ -8,6 +8,7 @@
 import * as db from './db.js';
 import { COLLECTIONS } from './db.js';
 import { EVENTS, emit } from '../core/events.js';
+import * as programService from './program-service.js';
 
 export const THEMES = ['dark', 'light', 'system'];
 export const UNITS = ['kg', 'lb'];
@@ -33,6 +34,18 @@ export function getUnits() {
 
 export function getProfile() {
   return db.read(COLLECTIONS.PROFILE);
+}
+
+/**
+ * Goal body weight: the profile's own value, falling back to the program's.
+ *
+ * Read through this rather than `profile.goalWeightKg` so the program document
+ * can carry the target and nothing has to be typed in twice.
+ */
+export function getGoalWeightKg() {
+  const own = getProfile().goalWeightKg;
+  if (own !== null && own !== undefined && own !== '') return Number(own);
+  return programService.getProgramGoalWeightKg();
 }
 
 export async function updateProfile(patch) {

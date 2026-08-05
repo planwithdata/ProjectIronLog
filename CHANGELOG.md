@@ -4,6 +4,60 @@ All notable changes to Project IronLog. Follows [Semantic Versioning](https://se
 
 ---
 
+## [1.5.0] — 2026-08-05 — Pyramid sets, goal weight, deploy hardening
+
+### Added
+
+**Pyramid (ramped) set prescriptions.** Cable Lateral Raise is 10/15/20 kg for
+12/10/8 reps — a different load *and* rep target per set, which the uniform-set
+model could not express. Rather than flatten it, exercises may now carry a
+`setPlan` array, and the engine gains a pyramid branch:
+
+- Each rung has its own load and its own rep target.
+- A rung below target gains one rep, capped at that rung's target — with no
+  shared minimum floor, since `reps.min` here is the *top* rung's target and
+  clamping to it would jump a 6 straight to 8.
+- The whole ladder advances by one increment only once **every** rung is met.
+- Progression works from what was actually lifted, so the ladder does not reset
+  to the JSON values after it has moved up.
+- Deload scales every rung, and a deload session never becomes the baseline.
+- `earnedAdvance` judges rung by rung: the middle rung's 10 reps must not be
+  allowed to satisfy the top rung's target of 8.
+
+**Body-weight goal in the program.** `program.goals.bodyWeightKg` is now 85 kg.
+The goal belongs in the program document — it is part of the plan, not a device
+preference — and Settings still overrides it. Home, the weight chart's reference
+line and the review's hold-or-cut rule all read through
+`settingsService.getGoalWeightKg()`.
+
+### Fixed
+
+- **GitHub Pages would have silently dropped a module.** Pages runs Jekyll
+  unless a `.nojekyll` file exists, and Jekyll excludes anything whose name
+  begins with an underscore — so `js/pages/_placeholder.js` would have 404'd in
+  production while working locally. `.nojekyll` added; the module turned out to
+  be dead code (Sessions 3 and 4 replaced both pages that used it) and was
+  removed.
+- **Per-side rep labels were doubled.** Bulgarian Split Squat rendered
+  "8-10/leg/side" and Pallof Press "12/side/side": the JSON label already
+  carries the per-side wording from the source document, so appending it again
+  duplicated it. Went unnoticed because the only day screenshotted during
+  Session 2 had no per-side exercises.
+
+### Tooling
+
+`tools/check.py` gained three deployment checks, all for bugs that pass locally
+and fail only in production:
+
+- **case sensitivity** — Windows resolves `./Pages/Home.js` to `./pages/home.js`;
+  Pages serves from Linux and does not
+- **Jekyll safety** — a missing `.nojekyll`, or any underscore-prefixed path
+- **orphan modules** — unreferenced files still sitting in the precache list
+  (the service worker is excluded from the reference scan, or anything precached
+  could never be reported)
+
+---
+
 ## [1.4.0] — 2026-08-05 — Session 5: Polish
 
 Accessibility, PWA install and update handling, performance, and a final

@@ -78,6 +78,13 @@ export function recommend(exercise, history = [], options = {}) {
   const increment = incrementFor(exercise);
   const repsFirst = exercise.progression?.mode === 'reps-first';
 
+  // A pyramid (a different load and rep target per set) is a different shape
+  // from the uniform-set default, so it gets its own branch rather than being
+  // flattened into a single weight it cannot represent.
+  if (Array.isArray(exercise.setPlan) && exercise.setPlan.length) {
+    return recommendPyramid(exercise, history, { ...options, setCount, increment, range });
+  }
+
   // Only real, loaded sessions inform a recommendation. A deload week is a
   // deliberate step backwards, so treating it as the new baseline would
   // ratchet the whole program down every fifth week.
@@ -186,6 +193,116 @@ export function recommend(exercise, history = [], options = {}) {
   };
 }
 
+/* --- Pyramid sets -------------------------------------------------------
+   Some prescriptions ramp the load across sets — 10/15/20 kg for 12/10/8 reps.
+   Double progression still applies, just per rung: each set has its own load
+   and its own rep target, and the whole ladder moves up only once every rung
+   has been earned. Flattening this into one weight and one range would lose
+   the prescription entirely.
+   ====================================================================== */
+
+function recommendPyramid(exercise, history, { isDeload, setCount, increment, range }) {
+  const plan = exercise.setPlan.slice(0, setCount);
+  const planWeights = plan.map((step) => step.weightKg ?? null);
+  const planReps = plan.map((step) => step.reps ?? range.min);
+
+  const working = history.filter((entry) => !entry.isDeload && completedSets(entry).length > 0);
+  const last = working[0] ?? null;
+
+  const base = {
+    increment,
+    perSetReps: planReps,
+    perSetWeights: planWeights,
+    isPyramid: true,
+    atTopOfRange: false,
+    stalledSessions: 0,
+  };
+
+  if (!last) {
+    return {
+      ...base,
+      action: ACTIONS.START,
+      // The heaviest rung is the headline figure the card shows.
+      weightKg: maxOrNull(planWeights),
+      reason: `Ramp the load: ${describePyramid(plan)}. Adjust any rung whose last rep is not genuinely hard.`,
+      previous: null,
+    };
+  }
+
+  const lastSets = completedSets(last);
+  const lastReps = lastSets.map((set) => set.reps ?? 0);
+  const lastWeights = lastSets.map((set) => set.weightKg ?? null);
+  const previous = { weightKg: workingWeight(last), reps: lastReps, date: last.date };
+
+  if (isDeload) {
+    return {
+      ...base,
+      action: ACTIONS.DELOAD_WAVE,
+      weightKg: maxOrNull(lastWeights),
+      perSetWeights: lastWeights
+        .slice(0, setCount)
+        .map((weight) => (weight === null ? null : roundTo(weight * DELOAD_LOAD_FACTOR, increment))),
+      reason: 'Deload week: same ladder at roughly 65% of last week, with sets cut.',
+      previous,
+    };
+  }
+
+  // Earned only when every rung met its own rep target.
+  const earned = lastReps.length >= setCount
+    && planReps.every((target, index) => (lastReps[index] ?? 0) >= target);
+
+  // Progress from what was actually lifted, not from the original plan — the
+  // ladder has moved up if previous sessions advanced it.
+  const currentWeights = planWeights.map((planned, index) => {
+    const logged = lastWeights[index];
+    return logged === null || logged === undefined ? planned : logged;
+  });
+
+  if (earned) {
+    return {
+      ...base,
+      action: ACTIONS.ADVANCE,
+      perSetWeights: currentWeights.map((weight) =>
+        (weight === null ? null : round2(weight + increment))),
+      weightKg: maxOrNull(currentWeights.map((w) => (w === null ? null : w + increment))),
+      reason: `Every rung hit its target. Add ${trim(increment)} kg to each set.`,
+      previous,
+      atTopOfRange: true,
+    };
+  }
+
+  return {
+    ...base,
+    action: ACTIONS.HOLD,
+    perSetWeights: currentWeights,
+    weightKg: maxOrNull(currentWeights),
+    // Chase the per-rung target rather than a shared range top. Deliberately
+    // no shared minimum floor: on this ladder `reps.min` is 8, which is the
+    // *top* rung's target, so clamping to it would jump a 6 straight to 8 and
+    // skip the rep that was actually being earned.
+    perSetReps: planReps.map((target, index) => {
+      const done = lastReps[index] ?? 0;
+      // A skipped set has nothing to add a rep to; re-prescribe its target.
+      if (done <= 0) return target;
+      return Math.min(done + 1, target);
+    }),
+    reason: `Hold the ladder and add a rep to any set below its target (${planReps.join('/')}).`,
+    previous,
+  };
+}
+
+/** "10 kg x 12, 15 kg x 10, 20 kg x 8" */
+function describePyramid(plan) {
+  return plan
+    .map((step) => `${trim(step.weightKg ?? 0)} kg x ${step.reps}`)
+    .join(', ');
+}
+
+function maxOrNull(values) {
+  const numbers = values.filter((value) => value !== null && value !== undefined);
+  return numbers.length ? Math.max(...numbers) : null;
+}
+
 /**
  * Per-set rep targets for a hold: add one rep to every set that is below the
  * top of the range, and leave the sets already there alone.
@@ -253,9 +370,18 @@ export function isEntryComplete(entry) {
  * result of the session is visible before leaving the gym.
  */
 export function earnedAdvance(exercise, sets) {
-  const range = repRange(exercise);
   const done = sets.filter((set) => set.completed && (set.reps ?? 0) > 0);
   if (done.length < exercise.sets) return false;
+
+  // A pyramid is judged rung by rung against its own targets, not against a
+  // single shared range top.
+  if (Array.isArray(exercise.setPlan) && exercise.setPlan.length) {
+    return exercise.setPlan
+      .slice(0, exercise.sets)
+      .every((step, index) => (done[index]?.reps ?? 0) >= (step.reps ?? 0));
+  }
+
+  const range = repRange(exercise);
   return done.slice(0, exercise.sets).every((set) => (set.reps ?? 0) >= range.max);
 }
 

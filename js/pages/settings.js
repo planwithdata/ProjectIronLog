@@ -231,6 +231,11 @@ function profileSection() {
     el('div.card.stack', { style: { gap: 'var(--s-4)' } }, [
       fieldRow('Height', 'cm', heightInput),
       fieldRow('Goal weight', 'kg', goalInput),
+      profile.goalWeightKg === null || profile.goalWeightKg === undefined
+        ? el('p.t-caption.t-faint', {
+            text: `Using the program's target of ${settingsService.getGoalWeightKg() ?? '—'} kg. Enter a value here to override it.`,
+          })
+        : null,
       fieldRow('Review every', 'days', reviewInput),
       profile.programStartDate
         ? el('p.t-caption.t-faint', { text: `Program started ${profile.programStartDate}.` })

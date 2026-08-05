@@ -192,7 +192,7 @@ function browseCard(exercise, day, wave) {
 
     el('div.ex-card__meta', {}, [
       metaPill('Sets', String(sets)),
-      metaPill('Reps', exercise.reps.label + (exercise.reps.perSide ? '/side' : '')),
+      metaPill('Reps', exercise.reps.label),
       metaPill('Rest', exercise.rest.label),
       plan.weightKg !== null
         ? metaPill('Target', `${trimNumber(displayWeight(plan.weightKg, units), 2)} ${units}`, 'accent')
@@ -280,7 +280,7 @@ function loggingCard(exercise, session, wave) {
   append(card, [
     exerciseHead(exercise, entry),
     el('div.ex-card__meta', {}, [
-      metaPill('Reps', range.label + (exercise.reps.perSide ? '/side' : '')),
+      metaPill('Reps', exercise.reps.label),
       metaPill('Rest', exercise.rest.label),
       entry.targetWeightKg !== null
         ? metaPill('Target', `${trimNumber(displayWeight(entry.targetWeightKg, units), 2)} ${units}`, 'accent')

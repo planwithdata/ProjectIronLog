@@ -14,6 +14,7 @@ import * as programService from './program-service.js';
 import * as bodyService from './body-service.js';
 import * as prService from './pr-service.js';
 import * as notesService from './notes-service.js';
+import * as settingsService from './settings-service.js';
 import { recovery, measurements, photos } from './logs-service.js';
 import { buildReview } from '../engine/review.js';
 import { estimate1rm } from '../engine/one-rep-max.js';
@@ -109,7 +110,6 @@ export function dueIn(endKey = today()) {
  * full period would understate the trend.
  */
 function weightBundle(startKey, endKey, days) {
-  const profile = db.read(COLLECTIONS.PROFILE);
 
   const firstWeekEnd = addDays(startKey, 6);
   const startAvg = bodyService.getAverageWeight(7, firstWeekEnd);
@@ -132,7 +132,7 @@ function weightBundle(startKey, endKey, days) {
     startAvg: startAvg?.average ?? null,
     endAvg: endAvg?.average ?? null,
     perWeek,
-    goalKg: profile.goalWeightKg ?? null,
+    goalKg: settingsService.getGoalWeightKg(),
     readings: bodyService.getWeightEntries()
       .filter((entry) => entry.date >= startKey && entry.date <= endKey).length,
   };

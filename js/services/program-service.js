@@ -122,6 +122,17 @@ export function getUnits() {
   return getProgram().program?.units ?? 'kg';
 }
 
+/**
+ * The program's own body-weight goal, used when the profile has none.
+ *
+ * The goal belongs in the program document — it is part of the plan, not a
+ * device preference — but an explicit entry in Settings still wins, so it can
+ * be changed without editing JSON.
+ */
+export function getProgramGoalWeightKg() {
+  return getProgram().program?.goals?.bodyWeightKg ?? null;
+}
+
 /* --- Training calendar -------------------------------------------------- */
 
 /**

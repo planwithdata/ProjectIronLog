@@ -155,8 +155,9 @@ function buildEntry(exercise, wave) {
     planReason: plan.reason,
     // Each slot is pre-filled with the recommended load and rep target so the
     // common case is one tap on the checkmark, not four fields of typing.
-    sets: plan.perSetReps.map((reps) => ({
-      weightKg: plan.weightKg,
+    // A pyramid supplies a load per set; everything else shares one.
+    sets: plan.perSetReps.map((reps, index) => ({
+      weightKg: plan.perSetWeights ? plan.perSetWeights[index] ?? null : plan.weightKg,
       reps,
       completed: false,
       rpe: null,

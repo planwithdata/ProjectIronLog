@@ -7,14 +7,9 @@ wish-list. `ROADMAP.md` holds the post-1.0 candidates.
 
 ## Needs a decision from you
 
-- [ ] **Cable Lateral Raise prescription.** You specified 3 sets. Reps, rest
-      and increment are not in the source document, so it currently mirrors
-      the Dumbbell Lateral Raise tier: **12–15 per side, 60 s rest, +1–2 kg**.
-      Change it in `data/workouts.json` if you want something different.
-- [ ] **Height and goal weight.** Settings → Profile. Height enables BMI; goal
-      weight enables the "to goal" tile on Home, the reference line on the
-      weight chart, and the review's hold-or-cut rule. You mentioned bulking to
-      79 kg — entering it makes all four live.
+- [ ] **Height.** Settings → Profile. This is the only remaining input; it
+      enables BMI. Goal weight (85 kg) and the Cable Lateral Raise ladder
+      (10/15/20 kg for 12/10/8) are both set in `data/workouts.json`.
 
 ## Before you rely on it
 
