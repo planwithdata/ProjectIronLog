@@ -122,7 +122,7 @@
 
 .btn:active { transform: scale(0.96); }
 
-.btn--primary { background: var(--c-accent); color: var(--c-accent-text); }
+.btn--primary { background: var(--c-accent-fill); color: var(--c-accent-text); }
 .btn--danger  { background: var(--c-danger-dim); color: var(--c-danger); }
 .btn--ghost   { background: transparent; color: var(--c-accent); }
 .btn--tinted  { background: var(--c-accent-dim); color: var(--c-accent); }
@@ -571,3 +571,45 @@ textarea.input { min-height: 88px; resize: vertical; line-height: var(--lh-norma
 .enter-stagger > *:nth-child(4) { animation-delay: 120ms; }
 .enter-stagger > *:nth-child(5) { animation-delay: 160ms; }
 .enter-stagger > *:nth-child(n + 6) { animation-delay: 200ms; }
+
+
+/* --- Hit-area expansion -------------------------------------------------
+   Several controls are visually compact by design (a 34px segmented control
+   is the iOS standard; a 30px table toggle sits inside a card header). The
+   Apple HIG minimum applies to the *touch target*, not the paint, so a
+   transparent ::after stretches each one to 44px without changing a single
+   pixel of layout. Positioned relative so the pseudo-element anchors.
+   ====================================================================== */
+
+.btn--sm,
+.btn-icon,
+.segmented__opt,
+.chart-card__toggle,
+.angle-row__opt,
+.set-row__step {
+  position: relative;
+}
+
+.btn--sm::after,
+.btn-icon::after,
+.segmented__opt::after,
+.chart-card__toggle::after,
+.angle-row__opt::after,
+.set-row__step::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* Centre a 44px band on the control, however tall it actually is. */
+  top: 50%;
+  transform: translateY(-50%);
+  height: max(100%, var(--touch));
+  min-width: var(--touch);
+  /* Keeps the expanded area from covering a neighbouring control's own band. */
+  z-index: 0;
+}
+
+/* The set-row steppers are already full-height inside a 44px group, and their
+   siblings sit immediately adjacent — expanding them would swallow the input
+   between them. */
+.set-row__step::after { height: 100%; min-width: 0; }

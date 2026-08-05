@@ -74,18 +74,36 @@ own and is committed separately.
 - [x] Two-week review generator with a rule-based training summary
 - [x] Review engine tests (20) and a PDF integration test
 
-## Session 5 — Polish
+## Session 5 — Polish ✅ complete
 
-- [ ] Motion pass — sheet transitions, ring fills, press feedback
-- [ ] Install prompt and update-available prompt
-- [ ] Offline hardening and cache-size management for photos
-- [ ] Performance: first paint, long-list rendering
-- [ ] Accessibility: focus order, VoiceOver labels, contrast audit, reduced motion
-- [ ] Bug fixing pass
-- [ ] Documentation finalised
-- [ ] Final review
+- [x] Motion pass — entrance stagger, spring presses, sheet transitions,
+      ring fills, reduced-motion honoured throughout
+- [x] Install prompt (native on Chrome, written steps on iOS) and an
+      update-available prompt that actually applies the update
+- [x] Offline hardening — complete precache, graceful failure for a route
+      whose module was never fetched
+- [x] Performance — lazy route modules: shell 442 KB → 202 KB, JS 378 → 139 KB
+- [x] Accessibility — all three text tiers and both accents re-derived from
+      measured contrast; 44px hit areas; route announcements; audit clean in
+      both themes across all nine routes
+- [x] Bug fixing — see the CHANGELOG's Fixed sections for each session
+- [x] Documentation — README, ROADMAP, CHANGELOG, TODO
+- [x] Final review
 
 ---
+
+## Version 1.0 — complete
+
+All five sessions delivered. What ships:
+
+- 37 exercises across 5 training days, parsed from the source documents
+- Double progression engine with deload waves and stall detection
+- Live set logging, a rest timer that survives a screen lock, workout history
+- Charts for weight, composition, strength, volume, consistency; PR badges
+- PDF/CSV/JSON export, progress photos, coach notes, recovery, measurements
+- A rule-based two-week review with a traceable recommendation
+- Installable, offline-capable, no backend, no account, no tracking
+- 62 engine assertions, 84 integration assertions, a clean accessibility audit
 
 ## Beyond 1.0
 

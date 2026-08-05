@@ -17,17 +17,79 @@ import * as settingsService from '../services/settings-service.js';
 import { THEMES, UNITS } from '../services/settings-service.js';
 import * as programService from '../services/program-service.js';
 import { APP_VERSION, BUILD_SESSION } from '../config.js';
+import * as pwa from '../services/pwa-service.js';
+import { IOS_INSTALL_STEPS } from '../services/pwa-service.js';
 import { sectionHead } from '../../components/stat.js';
+import { openSheet } from '../../components/sheet.js';
 
 const THEME_LABELS = { dark: 'Dark', light: 'Light', system: 'System' };
 
 export function render() {
   return el('div.page.enter', {}, [
+    installSection(),
     appearanceSection(),
     profileSection(),
     dataSection(),
     aboutSection(),
   ]);
+}
+
+/* --- Install ------------------------------------------------------------ */
+
+/**
+ * Only rendered when installing is actually possible. Once the app is running
+ * standalone there is nothing to offer, and a permanent "install me" row in an
+ * already-installed app is just noise.
+ */
+function installSection() {
+  if (pwa.isStandalone()) {
+    return el('div.card.row', { style: { gap: 'var(--s-3)' } }, [
+      el('div.list__icon', { style: { background: 'var(--c-success-dim)' } }, [icon('check')]),
+      el('div', { style: { minWidth: 0 } }, [
+        el('div.t-footnote.t-semibold', { text: 'Installed' }),
+        el('div.t-caption.t-faint', { text: 'Running from your Home Screen, offline capable' }),
+      ]),
+    ]);
+  }
+
+  if (!pwa.canOfferInstall()) return null;
+
+  return el('section', {}, [
+    sectionHead('Install'),
+    el('div.card', {}, [
+      el('p.t-subhead', {
+        text: 'Add IronLog to your Home Screen to launch it full screen and use it with no signal.',
+      }),
+      el('button.btn.btn--primary.btn--block', {
+        type: 'button',
+        text: pwa.hasNativePrompt() ? 'Install IronLog' : 'How to install',
+        style: { marginTop: 'var(--s-4)' },
+        on: { click: handleInstall },
+      }),
+    ]),
+  ]);
+}
+
+async function handleInstall() {
+  if (pwa.hasNativePrompt()) {
+    const outcome = await pwa.promptInstall();
+    if (outcome === 'accepted') toast('Installing…', 'success');
+    else if (outcome === 'dismissed') await pwa.markInstallDismissed();
+    refresh();
+    return;
+  }
+
+  // iOS has no install API at all — Share -> Add to Home Screen is the only
+  // route, so the honest thing is to say so.
+  await openSheet({
+    title: 'Add to Home Screen',
+    text: 'Safari has no install button, so this is done from the Share menu.',
+    body: el('ol.stack', { style: { gap: 'var(--s-2)', paddingLeft: 'var(--s-5)' } },
+      IOS_INSTALL_STEPS.map((step, index) =>
+        el('li.t-subhead.t-dim', { text: `${index + 1}. ${step}` }))),
+    actions: [{ label: 'Got it', value: true, tone: 'primary' }],
+  });
+  await pwa.markInstallDismissed();
 }
 
 /* --- Appearance --------------------------------------------------------- */
@@ -202,6 +264,7 @@ function dataSection() {
     type: 'file',
     accept: 'application/json,.json',
     style: { display: 'none' },
+    'aria-label': 'Choose a backup file to restore',
     on: { change: (event) => handleRestore(event.target) },
   });
 

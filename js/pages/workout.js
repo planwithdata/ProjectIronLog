@@ -112,7 +112,7 @@ function daySwitcher(selected, dayKey, locked) {
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px',
         minWidth: '52px', minHeight: '58px', padding: 'var(--s-2)',
         borderRadius: 'var(--r-md)',
-        background: isSelected ? 'var(--c-accent)' : 'var(--c-surface-1)',
+        background: isSelected ? 'var(--c-accent-fill)' : 'var(--c-surface-1)',
         color: isSelected ? 'var(--c-accent-text)' : (trainable ? 'var(--c-text)' : 'var(--c-text-3)'),
         border: `1px solid ${isToday && !isSelected ? 'var(--c-accent)' : 'var(--c-hairline)'}`,
         opacity: disabled ? '0.4' : '1',

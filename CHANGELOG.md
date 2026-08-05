@@ -4,6 +4,88 @@ All notable changes to Project IronLog. Follows [Semantic Versioning](https://se
 
 ---
 
+## [1.4.0] — 2026-08-05 — Session 5: Polish
+
+Accessibility, PWA install and update handling, performance, and a final
+audit pass. Version 1.0 is complete.
+
+### Added
+
+**PWA install and update** (`js/services/pwa-service.js`)
+- Install offer in Settings, shown only when installing is actually possible
+  and hidden once the app is running standalone.
+- Chrome's `beforeinstallprompt` is captured and deferred so the app chooses
+  the moment. iOS has no install API at all, so it gets written Share → Add to
+  Home Screen steps rather than a button that cannot work.
+- The nudge is suppressed for a fortnight once dismissed; an install banner on
+  every launch is an advert.
+- Update detection with an explicit prompt. A waiting worker is told to
+  `skipWaiting()` and the reload waits for `controllerchange` — reloading
+  without that is served by the *old* worker, which is why PWAs are famous for
+  shipping stale code for days. The prompt is deliberate rather than automatic:
+  reloading out from under someone mid-set would be worse than running
+  yesterday's build for another twenty minutes.
+
+**Route announcements**
+- A polite live region announces each view change. A hash change moves no
+  focus and fires no navigation, so a screen reader otherwise gets no
+  indication that anything happened.
+
+**Audit tooling**
+- `tools/audit.html` walks all nine routes in a phone-width frame and checks
+  accessible names, alt text, form labels, duplicate ids, touch-target sizes,
+  WCAG AA contrast against the real composited backdrop, horizontal overflow
+  and heading order — in both themes.
+- `tools/perf.html` measures the shell payload and asserts that the vendored
+  libraries are *not* fetched on routes that do not need them.
+
+### Changed
+
+**Lazy route modules.** Page modules now load on first visit via native
+`import()` rather than being imported up front. Home was paying for the chart
+card, the PDF builder and the photo store before drawing a pixel.
+
+| | before | after |
+|---|---|---|
+| Shell payload | 442.2 KB | **202.4 KB** |
+| JavaScript | 378.5 KB | **138.7 KB** |
+| Requests | 56 | **31** |
+
+`tools/check.py` now validates dynamic import paths too, so a typo in a lazy
+route cannot become a runtime-only failure on the one screen nobody clicked.
+
+**Design tokens re-derived from measured contrast.** The audit found 228
+issues, almost all tracing to two causes:
+
+- `--c-text-3` measured **2.6–2.8:1** — well below AA — and it carries real
+  content: stat labels, captions, section headings, tab bar labels. Apple's
+  iOS alphas (0.62 / 0.34) do not survive on this surface. All three text tiers
+  were raised until measured ≥ 4.5:1 in both themes, keeping the tier gap.
+- White on `--c-accent` measured **3.65:1**. One accent cannot do both jobs, so
+  there are now two: `--c-accent` for text and icons (5.3:1 on dark),
+  `--c-accent-fill` for filled buttons (4.9:1 under white text).
+- Light-mode `--c-success` sat at 4.40:1 and was darkened to 5.4:1.
+
+**Touch targets.** Compact controls (34px segmented options, the 30px table
+toggle, 36px icon buttons) keep their visual size but gain a transparent
+`::after` that stretches the hit area to the 44px HIG minimum without moving a
+pixel of layout.
+
+### Fixed
+
+- Home rendered a second `<h1>` alongside the app header's, so every view had
+  two top-level headings.
+- Hidden file inputs for photos and backup restore had no accessible name.
+- The day-strip's selected chip and the photo angle switcher painted white text
+  on the bright accent at 3.65:1.
+
+### Audit result
+
+Clean in both themes across all nine routes: no contrast failures, no unlabelled
+controls, no undersized targets, no overflow, no heading jumps.
+
+---
+
 ## [1.3.0] — 2026-08-05 — Session 4: Reports
 
 The coaching report, exports, progress photos, coach notes editor, recovery
@@ -370,5 +452,6 @@ Applied on request and recorded in `program.amendments` in `workouts.json`:
 
 ## Unreleased
 
-Session 2 will add live set logging, the rest timer, workout history and the
-progressive overload engine. See `ROADMAP.md`.
+Version 1.0 is complete across all five sessions. Post-1.0 candidates are
+recorded in `ROADMAP.md` under "Beyond 1.0"; known limitations and open items
+are in `TODO.md`.

@@ -67,7 +67,7 @@ function heroCard({ day, wave, active, dayKey }) {
         ? el('span.pill.pill--warning', { text: 'Cut sets ~40%' })
         : null,
     ]),
-    el('h1.hero__title', { text: day ? day.label : 'No session scheduled' }),
+    el('h2.hero__title', { text: day ? day.label : 'No session scheduled' }),
   ];
 
   if (isTraining) {

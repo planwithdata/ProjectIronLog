@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<!--
+  tools/audit.html — Accessibility and layout audit across every route.
+
+  Loads the app in a phone-width iframe, walks each route, and reports real,
+  checkable defects rather than impressions:
+
+    - interactive elements with no accessible name
+    - images with no alt attribute
+    - form controls with no label
+    - duplicate element ids
+    - touch targets below 44x44
+    - text below the WCAG AA contrast ratio
+    - anything wider than the viewport
+    - heading level jumps
+
+  Run it against a seeded profile so pages have content:
+
+    chrome --headless=new --virtual-time-budget=90000 \
+           --dump-dom http://127.0.0.1:PORT/tools/audit.html
+
+  Add ?theme=light to audit the light palette.
+-->
+<html>
+<head><meta charset="utf-8"><title>audit</title></head>
+<body style="margin:0;font:12px/1.5 monospace;background:#fff;color:#111">
+<pre id="out">auditing…</pre>
+<iframe id="frame" src="../index.html#/home" style="width:402px;height:900px;border:1px solid #ccc"></iframe>
+
+<script type="module">
+  const VIEWPORT = 402;
+  const TOUCH_MIN = 44;
+  const params = new URLSearchParams(location.search);
+
+  const ROUTES = [
+    'home', 'workout', 'history', 'progress',
+    'reports', 'notes', 'photos', 'logs', 'settings',
+  ];
+
+  const lines = [];
+  let issues = 0;
+
+  const report = (text) => { document.getElementById('out').textContent = text; };
+  const note = (route, kind, detail) => {
+    issues += 1;
+    lines.push(`  [${kind}] ${detail}`);
+  };
+
+  /* --- Contrast ---------------------------------------------------------- */
+
+  function parseColor(value) {
+    const match = String(value).match(/rgba?\(([^)]+)\)/);
+    if (!match) return null;
+    const parts = match[1].split(/[,\s/]+/).filter(Boolean).map(Number);
+    return { r: parts[0], g: parts[1], b: parts[2], a: parts[3] === undefined ? 1 : parts[3] };
+  }
+
+  const channel = (v) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+
+  const luminance = ({ r, g, b }) =>
+    0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+
+  const contrast = (fg, bg) => {
+    const l1 = luminance(fg);
+    const l2 = luminance(bg);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  };
+
+  /** Composite a possibly-translucent foreground over its effective backdrop. */
+  function flatten(fg, bg) {
+    if (fg.a >= 1) return fg;
+    return {
+      r: fg.r * fg.a + bg.r * (1 - fg.a),
+      g: fg.g * fg.a + bg.g * (1 - fg.a),
+      b: fg.b * fg.a + bg.b * (1 - fg.a),
+      a: 1,
+    };
+  }
+
+  /** Walk up for the first non-transparent background. */
+  function backdropOf(node, win) {
+    let current = node;
+    while (current && current !== win.document.documentElement) {
+      const bg = parseColor(win.getComputedStyle(current).backgroundColor);
+      if (bg && bg.a > 0.95) return bg;
+      current = current.parentElement;
+    }
+    const rootBg = parseColor(win.getComputedStyle(win.document.body).backgroundColor);
+    return rootBg && rootBg.a > 0 ? rootBg : { r: 0, g: 0, b: 0, a: 1 };
+  }
+
+  /* --- Accessible name -------------------------------------------------- */
+
+  function accessibleName(node) {
+    const label = node.getAttribute('aria-label');
+    if (label && label.trim()) return label.trim();
+
+    const labelledBy = node.getAttribute('aria-labelledby');
+    if (labelledBy) {
+      const target = node.ownerDocument.getElementById(labelledBy);
+      if (target?.textContent.trim()) return target.textContent.trim();
+    }
+
+    if (node.tagName === 'INPUT' || node.tagName === 'SELECT' || node.tagName === 'TEXTAREA') {
+      if (node.id) {
+        const explicit = node.ownerDocument.querySelector(`label[for="${node.id}"]`);
+        if (explicit?.textContent.trim()) return explicit.textContent.trim();
+      }
+      if (node.closest('label')?.textContent.trim()) return node.closest('label').textContent.trim();
+      if (node.getAttribute('placeholder')?.trim()) return `(placeholder) ${node.getAttribute('placeholder')}`;
+      if (node.getAttribute('title')?.trim()) return node.getAttribute('title');
+      return null;
+    }
+
+    if (node.textContent.trim()) return node.textContent.trim();
+    if (node.getAttribute('title')?.trim()) return node.getAttribute('title');
+    return null;
+  }
+
+  const describe = (node) => {
+    const cls = typeof node.className === 'string' && node.className.trim()
+      ? `.${node.className.trim().split(/\s+/).slice(0, 3).join('.')}`
+      : '';
+    return `${node.tagName.toLowerCase()}${cls}`;
+  };
+
+  /* --- Route audit ------------------------------------------------------- */
+
+  function auditRoute(route, doc, win) {
+    const found = [];
+    const add = (kind, detail) => found.push({ kind, detail });
+
+    /* Accessible names on interactive elements. */
+    for (const node of doc.querySelectorAll('button, a[href], [role="radio"], [role="button"]')) {
+      if (node.offsetParent === null && node.getBoundingClientRect().width === 0) continue;
+      if (!accessibleName(node)) add('no-name', `${describe(node)} has no accessible name`);
+    }
+
+    /* Images. */
+    for (const img of doc.querySelectorAll('img')) {
+      if (!img.hasAttribute('alt')) add('no-alt', `${describe(img)} is missing alt`);
+    }
+
+    /* Form controls. */
+    for (const field of doc.querySelectorAll('input:not([type="hidden"]), select, textarea')) {
+      const name = accessibleName(field);
+      if (!name) add('no-label', `${describe(field)} has no label`);
+      else if (name.startsWith('(placeholder)')) {
+        add('placeholder-label', `${describe(field)} is labelled only by its placeholder`);
+      }
+    }
+
+    /* Duplicate ids. */
+    const seen = new Map();
+    for (const node of doc.querySelectorAll('[id]')) {
+      seen.set(node.id, (seen.get(node.id) ?? 0) + 1);
+    }
+    for (const [id, count] of seen) {
+      if (count > 1) add('duplicate-id', `id="${id}" appears ${count} times`);
+    }
+
+    /* Touch targets.
+
+       A control may be visually compact but carry a transparent ::after that
+       stretches its hit area to 44px (see the hit-area block in
+       components.css). The *target* is what matters, so the pseudo-element's
+       height counts — otherwise this check would report defects that are not
+       real and hide the ones that are. */
+    for (const node of doc.querySelectorAll('button, a[href], select, input[type="checkbox"], [role="radio"]')) {
+      const rect = node.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      // Inline links inside a paragraph are exempt; this targets controls.
+      if (node.tagName === 'A' && node.closest('p')) continue;
+
+      const after = win.getComputedStyle(node, '::after');
+      const expanded = after.content && after.content !== 'none'
+        ? parseFloat(after.height) || 0
+        : 0;
+      const effectiveHeight = Math.max(rect.height, expanded);
+
+      // A control wrapped in a label is targetable across the whole label —
+      // clicking the text toggles the checkbox — so the label's box is the
+      // real target, in both dimensions.
+      const label = node.closest('label');
+      const labelRect = label ? label.getBoundingClientRect() : null;
+
+      const targetHeight = Math.max(effectiveHeight, labelRect?.height ?? 0);
+      const targetWidth = Math.max(rect.width, labelRect?.width ?? 0);
+
+      if (targetHeight < TOUCH_MIN - 0.5 || targetWidth < 24) {
+        add('small-target',
+          `${describe(node)} target is ${Math.round(targetWidth)}x${Math.round(targetHeight)} (min ${TOUCH_MIN} high)`);
+      }
+    }
+
+    /* Text contrast. */
+    const textNodes = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    const checked = new Set();
+    let textNode;
+    while ((textNode = textNodes.nextNode())) {
+      if (!textNode.textContent.trim()) continue;
+      const parent = textNode.parentElement;
+      if (!parent || checked.has(parent)) continue;
+      checked.add(parent);
+
+      const rect = parent.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+
+      const style = win.getComputedStyle(parent);
+      if (style.visibility === 'hidden' || style.display === 'none') continue;
+
+      const fg = parseColor(style.color);
+      if (!fg) continue;
+      const bg = backdropOf(parent, win);
+      const ratio = contrast(flatten(fg, bg), bg);
+
+      const size = parseFloat(style.fontSize);
+      const weight = Number(style.fontWeight) || 400;
+      // WCAG AA: 3:1 for large text (>=24px, or >=18.66px bold), else 4.5:1.
+      const large = size >= 24 || (size >= 18.66 && weight >= 700);
+      const required = large ? 3 : 4.5;
+
+      if (ratio < required - 0.05) {
+        add('contrast',
+          `${describe(parent)} ${ratio.toFixed(2)}:1 (needs ${required}) — "${textNode.textContent.trim().slice(0, 32)}"`);
+      }
+    }
+
+    /* Horizontal overflow. */
+    for (const node of doc.querySelectorAll('*')) {
+      const rect = node.getBoundingClientRect();
+      if (rect.width === 0) continue;
+      if (rect.right > VIEWPORT + 1 || rect.left < -1) {
+        const style = win.getComputedStyle(node);
+        // Deliberately scrollable strips are fine.
+        if (style.overflowX === 'auto' || style.overflowX === 'scroll') continue;
+        if (node.closest('.day-strip, .angle-row, .photo-strip, .chart-table')) continue;
+        add('overflow',
+          `${describe(node)} spans ${Math.round(rect.left)}..${Math.round(rect.right)} (viewport ${VIEWPORT})`);
+      }
+    }
+
+    /* Heading order. */
+    const levels = [...doc.querySelectorAll('h1, h2, h3, h4, h5, h6')]
+      .map((node) => Number(node.tagName[1]));
+    for (let i = 1; i < levels.length; i += 1) {
+      if (levels[i] - levels[i - 1] > 1) {
+        add('heading-jump', `h${levels[i - 1]} followed by h${levels[i]}`);
+      }
+    }
+
+    /* Exactly one h1 per view. */
+    const h1s = doc.querySelectorAll('h1').length;
+    if (h1s !== 1) add('h1-count', `${h1s} h1 elements (expected 1)`);
+
+    return found;
+  }
+
+  /* --- Driver ------------------------------------------------------------ */
+
+  const frame = document.getElementById('frame');
+
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function run() {
+    // Seed so the pages have content to audit.
+    const theme = params.get('theme');
+    if (theme) {
+      const key = 'ironlog:v1:settings';
+      const current = JSON.parse(localStorage.getItem(key) || '{}');
+      localStorage.setItem(key, JSON.stringify({ ...current, theme }));
+    }
+
+    await wait(2500);   // let the app boot
+
+    const win = frame.contentWindow;
+    const doc = frame.contentDocument;
+
+    if (!doc?.documentElement.dataset.booted) {
+      report('ERROR: app did not boot inside the frame');
+      return;
+    }
+
+    lines.push(`viewport ${VIEWPORT}px · theme ${theme || 'dark'}`);
+
+    for (const route of ROUTES) {
+      win.location.hash = `#/${route}`;
+      await wait(900);   // charts and lazy libraries need a moment
+
+      const found = auditRoute(route, doc, win);
+      lines.push('', `#/${route} — ${found.length ? `${found.length} issue(s)` : 'clean'}`);
+      for (const item of found) {
+        issues += 1;
+        lines.push(`  [${item.kind}] ${item.detail}`);
+      }
+      report(lines.join('\n'));
+    }
+
+    lines.unshift(`AUDIT ${issues === 0 ? 'CLEAN' : `${issues} issue(s)`}`);
+    report(lines.join('\n'));
+    document.title = issues === 0 ? 'CLEAN' : `${issues} issues`;
+  }
+
+  run().catch((error) => report(`THREW: ${error?.stack || error}`));
+</script>
+</body>
+</html>

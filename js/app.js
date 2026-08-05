@@ -19,21 +19,28 @@ import * as settingsService from './services/settings-service.js';
 import * as programService from './services/program-service.js';
 import { nav } from '../components/nav.js';
 import { mountToastHost } from '../components/toast.js';
+import * as pwa from './services/pwa-service.js';
+import { UPDATE_READY } from './services/pwa-service.js';
+import { openSheet } from '../components/sheet.js';
 import { APP_VERSION } from './config.js';
 
-import { page as homePage } from './pages/home.js';
-import { page as workoutPage } from './pages/workout.js';
-import { page as historyPage } from './pages/history.js';
-import { page as progressPage } from './pages/progress.js';
-import { page as reportsPage } from './pages/reports.js';
-import { page as notesPage } from './pages/notes.js';
-import { page as photosPage } from './pages/photos.js';
-import { page as logsPage } from './pages/logs.js';
-import { page as settingsPage } from './pages/settings.js';
 
+/**
+ * Route table. Titles are eager — the header and tab bar need to label a route
+ * without loading it — while the page modules arrive on first visit via native
+ * `import()`. Importing all nine up front meant Home paid for the chart card,
+ * the PDF builder and the photo store before drawing anything.
+ */
 const PAGES = [
-  homePage, workoutPage, historyPage, progressPage,
-  reportsPage, notesPage, photosPage, logsPage, settingsPage,
+  { name: 'home',     title: 'Home',            load: () => import('./pages/home.js') },
+  { name: 'workout',  title: 'Workout',         load: () => import('./pages/workout.js') },
+  { name: 'history',  title: 'History',         load: () => import('./pages/history.js') },
+  { name: 'progress', title: 'Progress',        load: () => import('./pages/progress.js') },
+  { name: 'reports',  title: 'Reports',         load: () => import('./pages/reports.js') },
+  { name: 'notes',    title: 'Coach notes',     load: () => import('./pages/notes.js') },
+  { name: 'photos',   title: 'Progress photos', load: () => import('./pages/photos.js') },
+  { name: 'logs',     title: 'Logs',            load: () => import('./pages/logs.js') },
+  { name: 'settings', title: 'Settings',        load: () => import('./pages/settings.js') },
 ];
 
 async function boot() {
@@ -62,7 +69,9 @@ async function boot() {
     on(EVENTS.DATA_RESET, () => router.refresh());
 
     document.documentElement.dataset.booted = 'true';
-    registerServiceWorker();
+
+    pwa.init();
+    wireUpdatePrompt();
   } catch (error) {
     console.error('[app] boot failed:', error);
     root.replaceChildren(bootErrorPage(error));
@@ -95,6 +104,16 @@ function buildShell() {
     el('a.skip-link', { href: '#outlet', text: 'Skip to content' }),
     shell,
     nav(),
+    // A hash change moves no focus and fires no navigation, so a screen
+    // reader is given no indication the view changed. This live region is
+    // what announces it.
+    el('div', {
+      id: 'route-announcer',
+      role: 'status',
+      'aria-live': 'polite',
+      'aria-atomic': 'true',
+      class: 'sr-only',
+    }),
   ]);
 }
 
@@ -106,10 +125,17 @@ function wireHeader(outlet) {
   const header = $('.app-header');
   const title = $('#page-title');
 
+  const announcer = $('#route-announcer');
+
   on(EVENTS.ROUTE_CHANGED, ({ name }) => {
     const page = PAGES.find((candidate) => candidate.name === name);
-    title.textContent = page?.title ?? 'IronLog';
+    const label = page?.title ?? 'IronLog';
+    title.textContent = label;
     header.dataset.scrolled = 'false';
+
+    // Announce on the next frame: setting the text in the same tick as the
+    // DOM swap is often missed by assistive technology.
+    requestAnimationFrame(() => { announcer.textContent = `${label} page`; });
   });
 
   // rAF-throttled: scroll fires far more often than a paint can use.
@@ -163,30 +189,27 @@ function bootErrorPage(error) {
   ]);
 }
 
-/* --- Service worker ----------------------------------------------------- */
+/* --- Updates ------------------------------------------------------------ */
 
 /**
- * Registered with a relative path so the app works from a GitHub Pages
- * subdirectory (`/ProjectIronLog/`) as well as from a domain root. An
- * absolute `/service-worker.js` would 404 on Pages.
+ * Offer to apply a downloaded update.
+ *
+ * Deliberately a prompt rather than an automatic reload: reloading out from
+ * under someone who is mid-set, with unticked sets on screen, would be worse
+ * than running yesterday's build for another twenty minutes.
  */
-function registerServiceWorker() {
-  if (!('serviceWorker' in navigator)) return;
-  if (location.protocol === 'file:') return;   // no SW without http(s)
-
-  window.addEventListener('load', () => {
-    navigator.serviceWorker
-      .register('./service-worker.js')
-      .then((registration) => {
-        console.info(`[app] IronLog ${APP_VERSION} ready (offline capable).`);
-        registration.addEventListener('updatefound', () => {
-          console.info('[app] a new version is downloading.');
-        });
-      })
-      .catch((error) => {
-        // Offline support is an enhancement; losing it must not break the app.
-        console.warn('[app] service worker registration failed:', error);
-      });
+function wireUpdatePrompt() {
+  on(UPDATE_READY, async () => {
+    console.info('[app] an update is ready to apply.');
+    const apply = await openSheet({
+      title: 'Update available',
+      text: 'A new version of IronLog has downloaded. Reloading takes a second and your data is untouched.',
+      actions: [
+        { label: 'Reload now', value: true, tone: 'primary' },
+        { label: 'Later', value: false, tone: 'plain' },
+      ],
+    });
+    if (apply) pwa.applyUpdate();
   });
 }
 

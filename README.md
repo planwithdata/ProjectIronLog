@@ -4,7 +4,7 @@ A personal gym companion. Mobile-first Progressive Web App: installable on an
 iPhone Home Screen, works offline, stores everything on the device, and never
 talks to a server.
 
-**Version 1.3.0 — Sessions 1–4 of 5 complete.**
+**Version 1.4.0 — complete. All five build sessions delivered.**
 
 ---
 
@@ -25,7 +25,20 @@ talks to a server.
 | Reports — PDF, CSV, JSON | Done |
 | Progress photos, coach notes, recovery, measurements | Done |
 | Two-week review generator | Done — rule-based, traceable |
-| Polish, animation, a11y pass | Session 5 |
+| Install & update prompts | Done |
+| Accessibility | Done — audit clean in both themes, all nine routes |
+| Performance | Done — 202 KB shell, lazy route modules |
+
+### By the numbers
+
+| | |
+|---|---|
+| Shell payload | 202 KB (31 requests) · first paint ~70 ms locally |
+| Engine tests | 62 assertions (`node --test tools/`) |
+| Integration tests | 84 assertions (`tools/e2e.html`) |
+| Accessibility audit | clean, both themes, all nine routes |
+| Dependencies | 2, both vendored: Chart.js 4.5.1, jsPDF 3.0.1 |
+| Build step | none |
 
 ---
 
@@ -124,9 +137,18 @@ js/
   engine/
     progression.js         double progression — pure, tested
     one-rep-max.js         Epley estimate — pure, tested
-  pages/                   home, workout, history, progress, reports, settings
+    logs-service.js        recovery, measurements, photos
+    photo-store.js         IndexedDB blob store for photos
+    review-service.js      gathers figures for the review engine
+    pwa-service.js         install and update handling
+  engine/
+    review.js              two-week review rules — pure, tested
+  charts/                  lazy Chart.js loader, palette, theming
+  reports/                 PDF builder, CSV, photo embedding
+  pages/                   loaded lazily by the router
 
-components/                nav, ring, stat, toast, set-row, rest-bar, sheet
+components/                nav, ring, stat, toast, set-row, rest-bar, sheet,
+                           chart-card
 data/workouts.json         the training program (replaceable)
 icons/                     PWA icons, generated from icon.svg
 tools/                     check.py, test.mjs, e2e.html, preview.html, probe.html
@@ -146,7 +168,18 @@ from any host.
 
 **Design tokens as CSS custom properties.** One file defines every colour and
 spacing value. Light mode is a token override — no component stylesheet knows
-a theme exists.
+a theme exists. Every text and accent value was **measured** against the
+surface it actually renders on and raised until it cleared WCAG AA; Apple's own
+iOS alphas do not survive that test here. `tools/audit.html` re-checks it.
+
+**Two accent tokens.** `--c-accent` reads as text on a near-black surface
+(5.3:1); `--c-accent-fill` carries white button text (4.9:1). One value cannot
+do both jobs, and white on the bright accent measured 3.65:1.
+
+**Lazy route modules.** Pages load on first visit via native `import()`.
+Importing all nine up front cost 442 KB before Home drew a pixel; it is now
+202 KB. Stylesheets stay eager — splitting CSS per route trades a flash of
+unstyled content for a few kilobytes, which is the wrong way round.
 
 **Tab bar becomes a sidebar at 1024px.** A bottom tab bar is a phone pattern;
 on a desktop it strands navigation at the far edge of the window.
@@ -207,9 +240,21 @@ one place where a quiet mistake would corrupt years of training decisions.
 ## Checking your work
 
 ```bash
-python tools/check.py          # parses every module, resolves every import
-node --test tools/            # 62 assertions over the engines
+python tools/check.py     # parses every module; resolves every import,
+                          # including dynamic ones, plus HTML and precache refs
+node --test tools/        # 62 assertions over the progression, analytics,
+                          # 1RM and review engines
 ```
+
+Then, over HTTP, in a **throwaway browser profile** (these clear Local Storage
+on the origin they run against):
+
+| Page | What it proves |
+|---|---|
+| `tools/e2e.html` | 84 service-layer assertions against real Local Storage: multi-session progression, the deload wave, PR detection, resume guards, set editing, CSV escaping, a real multi-page PDF, backup round trip |
+| `tools/audit.html` | accessible names, alt text, labels, duplicate ids, 44px targets, WCAG AA contrast, overflow and heading order — across all nine routes. `?theme=light` for the light palette |
+| `tools/perf.html` | shell payload, and that the vendored libraries are not fetched on routes that do not need them |
+| `tools/pdf-dump.html` | emits a generated report as base64 so the PDF can be pulled out and actually looked at |
 
 Open `tools/e2e.html` over HTTP for 61 integration assertions against real
 Local Storage: multi-session progression, the deload wave, PR detection,

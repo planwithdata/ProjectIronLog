@@ -152,7 +152,7 @@
 }
 
 .angle-row__opt[aria-pressed="true"] {
-  background: var(--c-accent);
+  background: var(--c-accent-fill);
   color: var(--c-accent-text);
 }
 

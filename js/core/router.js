@@ -9,10 +9,25 @@
  * are handled entirely in the browser, so every URL works on a cold load
  * from any host and from the installed Home Screen shortcut.
  *
- * Routes are registered as `{ name, title, render, mount }`:
+ * Routes are registered as `{ name, title, render, mount }`, or as
+ * `{ name, title, load }` where `load` is a function returning a dynamic
+ * `import()` of the page module.
+ *
  *   render(params) -> Node            builds the page content
  *   mount(node, params) -> cleanup?   optional; runs after insertion, may
  *                                     return a teardown function
+ *   load() -> Promise<{ page }>       lazy alternative to render/mount
+ *
+ * Why lazy pages
+ * --------------
+ * Importing all nine page modules from app.js meant Home paid for the chart
+ * card, the PDF builder and the photo store before drawing a single pixel —
+ * 442 KB of JavaScript for a screen that needs about a third of it. Native
+ * `import()` fixes that with no build step: a route's code arrives the first
+ * time it is visited and is cached from then on.
+ *
+ * `title` stays eager, because the header and the tab bar need to label a
+ * route without loading it.
  */
 
 import { EVENTS, emit } from './events.js';
@@ -23,9 +38,32 @@ let notFound = null;
 let current = null;      // { name, params }
 let cleanup = null;      // teardown from the active route's mount()
 
-/** Register a route. */
-export function route({ name, title, render, mount }) {
-  routes.set(name, { name, title, render, mount });
+/**
+ * Guards against a slow module resolving after the user has moved on: each
+ * resolve() takes a ticket, and a stale one discards its own result.
+ */
+let navigationToken = 0;
+
+/** Register a route, eagerly or lazily. */
+export function route({ name, title, render, mount, load }) {
+  if (!render && !load) {
+    throw new Error(`[router] route "${name}" needs either render() or load()`);
+  }
+  routes.set(name, { name, title, render, mount, load, module: null });
+}
+
+/**
+ * Resolve a route's page module, loading it on first use.
+ * A failed import is not cached, so a flaky first fetch can be retried.
+ */
+async function pageFor(target) {
+  if (target.render) return target;          // eagerly registered
+  if (target.module) return target.module;
+
+  const imported = await target.load();
+  const page = imported.page ?? imported.default ?? imported;
+  target.module = page;
+  return page;
 }
 
 /** Register the fallback used when a hash matches no route. */
@@ -70,7 +108,8 @@ export function currentRoute() {
 }
 
 /** Render whatever the current hash points at. */
-function resolve() {
+async function resolve() {
+  const token = ++navigationToken;
   const { name, params } = parseHash(window.location.hash);
   const target = routes.get(name);
 
@@ -89,9 +128,27 @@ function resolve() {
     return;
   }
 
+  // Announce the route before awaiting the module, so the header and tab bar
+  // update immediately rather than lagging a network fetch.
+  if (target.title) document.title = `${target.title} · IronLog`;
+  current = { name, params };
+  emit(EVENTS.ROUTE_CHANGED, current);
+
+  let page;
+  try {
+    page = await pageFor(target);
+  } catch (error) {
+    console.error(`[router] "${name}" failed to load:`, error);
+    if (token === navigationToken) outlet.replaceChildren(loadErrorPage(name, error));
+    return;
+  }
+
+  // The user navigated again while the module was in flight.
+  if (token !== navigationToken) return;
+
   let node;
   try {
-    node = target.render(params);
+    node = page.render(params);
   } catch (error) {
     console.error(`[router] "${name}" failed to render:`, error);
     node = errorPage(error);
@@ -102,24 +159,39 @@ function resolve() {
   // Each route change starts at the top; the scroll container is .app-main.
   outlet.scrollTop = 0;
 
-  if (target.title) document.title = `${target.title} · IronLog`;
-
-  current = { name, params };
-
-  if (typeof target.mount === 'function') {
+  if (typeof page.mount === 'function') {
     try {
-      cleanup = target.mount(node, params) || null;
+      cleanup = page.mount(node, params) || null;
     } catch (error) {
       console.error(`[router] "${name}" failed to mount:`, error);
     }
   }
-
-  emit(EVENTS.ROUTE_CHANGED, current);
 }
 
 /** Re-render the current route in place, keeping its params. */
 export function refresh() {
   if (current) resolve();
+}
+
+/**
+ * Shown when a page module could not be fetched — offline on a route that has
+ * never been visited, so the service worker has nothing cached for it.
+ */
+function loadErrorPage(name, error) {
+  const wrap = document.createElement('div');
+  wrap.className = 'page';
+  wrap.innerHTML = `
+    <div class="card">
+      <div class="card__title">Could not open this page</div>
+      <p class="t-subhead t-dim" style="margin-top:8px">
+        The code for this screen could not be fetched. If you are offline, it
+        should work once you have opened it online at least once.
+      </p>
+      <p class="t-caption t-faint" style="margin-top:12px">Nothing you have logged is affected.</p>
+      <a class="btn btn--tinted" href="#/home" style="margin-top:16px">Go home</a>
+    </div>`;
+  console.warn(`[router] could not load "${name}":`, error);
+  return wrap;
 }
 
 function errorPage(error) {

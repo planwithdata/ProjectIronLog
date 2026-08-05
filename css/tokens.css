@@ -18,14 +18,26 @@
   --c-hairline:      rgba(255, 255, 255, 0.09);
   --c-hairline-firm: rgba(255, 255, 255, 0.16);
 
-  --c-text:          #f5f5f7;
-  --c-text-2:        rgba(235, 235, 245, 0.62);
-  --c-text-3:        rgba(235, 235, 245, 0.34);
+  /* Three text tiers. The alpha values are chosen so that ALL THREE clear
+     WCAG AA (4.5:1) against the surfaces they actually render on — measured,
+     not assumed. Apple's own iOS values (0.62 / 0.34) sit at 6.6:1 and 2.8:1
+     here; the tertiary tier failed badly, and it carries real content in this
+     app (stat labels, captions, section headings, tab labels), so it was
+     raised until it passed. `tools/audit.html` re-checks this. */
+  --c-text:          #f5f5f7;                      /* 18.9:1 */
+  --c-text-2:        rgba(235, 235, 245, 0.75);    /*  9.3:1 */
+  --c-text-3:        rgba(235, 235, 245, 0.52);    /*  4.6:1 */
 
   /* --- Palette: accents --------------------------------------------------
      One accent (iron blue) carries all primary actions. The rest are
-     reserved for meaning — never for decoration. */
-  --c-accent:        #0a84ff;
+     reserved for meaning — never for decoration.
+
+     Two accent values, because one cannot satisfy both jobs: an accent bright
+     enough to read as text on a near-black surface is too bright to carry
+     white text as a fill. `--c-accent` is for text, icons and rules;
+     `--c-accent-fill` is for filled buttons. */
+  --c-accent:        #0a84ff;   /* 5.3:1 as text on the dark surface */
+  --c-accent-fill:   #0a6fd8;   /* 4.9:1 against white button text   */
   --c-accent-dim:    #0a84ff29;
   --c-accent-text:   #ffffff;
 
@@ -160,17 +172,21 @@
   --c-hairline:      rgba(60, 60, 67, 0.12);
   --c-hairline-firm: rgba(60, 60, 67, 0.24);
 
-  --c-text:          #1c1c1e;
-  --c-text-2:        rgba(60, 60, 67, 0.62);
-  --c-text-3:        rgba(60, 60, 67, 0.34);
+  /* Measured against the white card surface: 0.62 gave 3.6:1 and 0.34 gave
+     1.9:1, both below AA. Raised until all three tiers pass. */
+  --c-text:          #1c1c1e;                   /* 15.9:1 */
+  --c-text-2:        rgba(60, 60, 67, 0.88);    /*  7.4:1 */
+  --c-text-3:        rgba(60, 60, 67, 0.72);    /*  4.7:1 */
 
-  --c-accent:        #007aff;
-  --c-success:       #248a3d;
-  --c-warning:       #c93400;
+  --c-accent:        #0069e0;   /* 5.1:1 as text on white */
+  --c-accent-fill:   #0b66c8;   /* 5.6:1 against white button text */
+  --c-accent-dim:    #0069e01f;
+  --c-success:       #1f7a34;   /* 5.4:1 on white; #248a3d measured 4.40 */
+  --c-warning:       #c93400;   /* 5.3:1 */
   --c-danger:        #d70015;
   --c-pr:            #a25c00;
 
-  --c-track:         rgba(60, 60, 67, 0.12);
+  --c-track:         rgba(60, 60, 67, 0.16);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
@@ -190,14 +206,16 @@
     --c-hairline:      rgba(60, 60, 67, 0.12);
     --c-hairline-firm: rgba(60, 60, 67, 0.24);
     --c-text:          #1c1c1e;
-    --c-text-2:        rgba(60, 60, 67, 0.62);
-    --c-text-3:        rgba(60, 60, 67, 0.34);
-    --c-accent:        #007aff;
-    --c-success:       #248a3d;
+    --c-text-2:        rgba(60, 60, 67, 0.88);
+    --c-text-3:        rgba(60, 60, 67, 0.72);
+    --c-accent:        #0069e0;
+    --c-accent-fill:   #0b66c8;
+    --c-accent-dim:    #0069e01f;
+    --c-success:       #1f7a34;
     --c-warning:       #c93400;
     --c-danger:        #d70015;
     --c-pr:            #a25c00;
-    --c-track:         rgba(60, 60, 67, 0.12);
+    --c-track:         rgba(60, 60, 67, 0.16);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
     --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
     --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.12);

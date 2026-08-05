@@ -23,7 +23,7 @@
  * service worker runs outside the module graph and cannot import it.
  */
 
-const CACHE_VERSION = 'v1.3.0';
+const CACHE_VERSION = 'v1.4.0';
 const CACHE_NAME = `ironlog-${CACHE_VERSION}`;
 
 /**
@@ -67,6 +67,7 @@ const PRECACHE = [
   './js/services/logs-service.js',
   './js/services/photo-store.js',
   './js/services/review-service.js',
+  './js/services/pwa-service.js',
   './js/pages/home.js',
   './js/pages/workout.js',
   './js/pages/history.js',

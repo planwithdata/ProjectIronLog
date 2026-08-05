@@ -17,6 +17,10 @@ import tempfile
 SKIP_DIRS = {'.git', '.pdfimgs', '.pdfpages', 'node_modules', '.claude', 'tools'}
 
 IMPORT_RE = re.compile(r"""(?:from|import)\s+['"](\.[^'"]+)['"]""")
+# Lazy route modules: `load: () => import('./pages/home.js')`. Without this
+# pattern a typo in a lazy path would only surface at runtime, on the one route
+# nobody clicked before shipping.
+DYNAMIC_IMPORT_RE = re.compile(r"""import\(\s*['"](\.[^'"]+)['"]\s*\)""")
 URL_RE = re.compile(r"""new URL\(\s*['"](\.[^'"]+)['"]""")
 HTML_REF_RE = re.compile(r"""(?:href|src)=["'](\./[^"']+)["']""")
 
@@ -55,7 +59,10 @@ def check_imports(files):
     for path in files:
         source = open(path, encoding='utf-8').read()
         base = os.path.dirname(path)
-        for match in list(IMPORT_RE.finditer(source)) + list(URL_RE.finditer(source)):
+        matches = (list(IMPORT_RE.finditer(source))
+                   + list(DYNAMIC_IMPORT_RE.finditer(source))
+                   + list(URL_RE.finditer(source)))
+        for match in matches:
             spec = match.group(1)
             target = os.path.normpath(os.path.join(base, spec))
             if not os.path.exists(target):

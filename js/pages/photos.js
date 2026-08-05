@@ -130,6 +130,9 @@ function slot(category, date, onChange) {
     capture: 'environment',
     style: { display: 'none' },
     id: `photo-${category.key}`,
+    // Hidden and click-triggered by the tile above, but still labelled: an
+    // unlabelled control is a defect whether or not it is currently visible.
+    'aria-label': `Choose a ${category.label} photo`,
   });
 
   input.addEventListener('change', async (event) => {
