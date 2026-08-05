@@ -1,0 +1,19 @@
+# Normalise line endings in the repository, check out native on each platform.
+# Without this, every file shows as modified when the project is touched from
+# a different OS.
+* text=auto
+
+# Source files are always LF in the repo.
+*.html   text eol=lf
+*.css    text eol=lf
+*.js     text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.py     text eol=lf
+*.svg    text eol=lf
+
+# Binary — never diff or convert.
+*.png    binary
+*.jpg    binary
+*.pdf    binary
+*.docx   binary
