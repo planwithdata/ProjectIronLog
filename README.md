@@ -4,69 +4,12 @@ A personal gym companion. Mobile-first Progressive Web App: installable on an
 iPhone Home Screen, works offline, stores everything on the device, and never
 talks to a server.
 
-**Version 1.4.0 — complete. All five build sessions delivered.**
-
----
-
-## What it does today
-
-| Area | Status |
-|---|---|
-| Design system, app shell, navigation | Done |
-| Home page | Done |
-| Program data parsed from source documents | Done — 37 exercises across 5 training days |
-| Progressive overload engine | Done — double progression, deload wave, stall detection |
-| Workout history | Done — per-session detail, re-open, delete |
-| Workout page | Live set logging, rest timer, completion summary |
-| Storage layer with backup & restore | Done |
-| Theme (dark / light / system), units (kg / lb) | Done |
-| PWA: manifest, icons, offline cache | Done |
-| Progress dashboard | Done — weight, composition, strength, volume, consistency, PRs |
-| Reports — PDF, CSV, JSON | Done |
-| Progress photos, coach notes, recovery, measurements | Done |
-| Two-week review generator | Done — rule-based, traceable |
-| Install & update prompts | Done |
-| Accessibility | Done — audit clean in both themes, all nine routes |
-| Exercise illustrations | Done — start/end frames for all 37 |
-| Performance | Done — 202 KB shell, lazy route modules |
-
-### By the numbers
-
-| | |
-|---|---|
-| Shell payload | 243 KB cold (31 requests, incl. the 35 KB program file) · first paint ~70 ms locally |
-| Engine tests | 62 assertions (`node --test tools/`) |
-| Integration tests | 84 assertions (`tools/e2e.html`) |
-| Accessibility audit | clean, both themes, all nine routes |
-| Dependencies | 2, both vendored: Chart.js 4.5.1, jsPDF 3.0.1 |
-| Illustrations | 74 images, 0.96 MB, public domain, lazy-loaded |
-| Build step | none |
-
 ---
 
 ## Running it
 
 No build step, no dependencies, no toolchain. But it does need to be served
 over HTTP — ES modules and service workers do not work from `file://`.
-
-```bash
-cd ProjectIronLog
-python -m http.server 8000
-# open http://127.0.0.1:8000
-```
-
-### Deploying to GitHub Pages
-
-```bash
-git push origin main
-```
-
-Then in the repository: **Settings → Pages → Source: `main` / root**.
-
-Every path in the app is relative (`./css/...`, not `/css/...`), so it works
-unchanged from `https://user.github.io/ProjectIronLog/` as well as from a
-domain root. This is the single most common way a Pages deploy of a PWA
-breaks, and it is why there are no absolute paths anywhere.
 
 ### Installing on an iPhone
 
