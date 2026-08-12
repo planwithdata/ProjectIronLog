@@ -1,6 +1,6 @@
 # TODO
 
-Version 1.7.0 is complete. What follows is what is genuinely open, not a
+Version 1.7.1 is complete. What follows is what is genuinely open, not a
 wish-list. `ROADMAP.md` holds the post-1.0 candidates.
 
 ---
@@ -24,19 +24,24 @@ wish-list. `ROADMAP.md` holds the post-1.0 candidates.
 
 ## Needs a decision from you
 
-- [ ] **Are the squat, leg press and calf-raise numbers plate loads?** Week one has
-      Back Squat at `150 / 180 / 200 / 220` kg while Incline Dumbbell Press tops
-      out at 27.5 kg per hand. Those two are hard to reconcile on the same
-      lifter, so either the squat figures mean something other than plates on a
-      bar, or they are a mislog. **The app has changed nothing and will change
-      nothing** — it preserves and displays exactly what was entered, and the
-      barbell convention shows it as `+220 kg plates · est. total 240 kg`. But the
-      progression engine is anchored to 220 kg for that lift, so if the number is
-      wrong the recommendation is wrong. Editing the session in History fixes it.
-- [ ] **Bar weights.** Back Squat, RDL and Hip Thrust assume a 20 kg Olympic bar,
-      which only affects the *estimated total* line. The EZ bar and the Smith
-      machine claim no bar weight, because theirs vary and guessing would present
-      a made-up number as a measurement. Add `barWeightKg` in
+- [ ] **Are the leg press and calf-raise numbers plate loads?** Week one has Leg
+      Press at `110 / 160 / 200` kg and Standing Calf Raise topping out at 200,
+      while Incline Dumbbell Press tops out at 27.5 kg per hand. Those are hard
+      to reconcile on the same lifter, so either they mean something other than
+      plates on a bar, or they are a mislog. **The app has changed nothing and
+      will change nothing** — it preserves and displays exactly what was entered.
+      Editing the session in History fixes it if it is wrong. 1.7.1 takes some of
+      the sting out of this: the coming week is baselined from the *second*
+      working set rather than the heaviest, so a single mistyped top set no
+      longer sets the whole week's prescription.
+      (The same question hung over Back Squat at `150 / 180 / 200 / 220`. That
+      movement has since been replaced by Hack Squat, which starts its own load
+      history, so the question is now moot for legs.)
+- [ ] **Bar weights.** RDL and Hip Thrust assume a 20 kg Olympic bar, which only
+      affects the *estimated total* line. The EZ bar and the Smith machine claim
+      no bar weight, because theirs vary and guessing would present a made-up
+      number as a measurement. Hack Squat claims none either — a sled's carriage
+      weight is a property of that specific machine. Add `barWeightKg` in
       `data/workouts.json` if you want those totals.
 - [ ] **Height** is set (177.8 cm), so BMI works. Nothing else is outstanding.
 
@@ -69,7 +74,10 @@ wish-list. `ROADMAP.md` holds the post-1.0 candidates.
 - [ ] **`workingWeight` takes the heaviest completed working set.** Correct for
       working up to a top set, but a mistyped heavy weight still anchors the
       engine to it. A sanity warning on an implausible jump would be better —
-      see the squat question above for why this is not theoretical.
+      see the leg press question above for why this is not theoretical.
+      `WORKING_SET_REBASELINE` in `js/config.js` is a one-week override of this,
+      not a fix for it: it expires after five completed sessions and the default
+      goes back to the heaviest set.
 - [ ] **A JSON backup does not contain photo images.** Photos live in IndexedDB,
       deliberately — base64 in Local Storage would exhaust the quota within about
       two months. Photos have to be saved separately.

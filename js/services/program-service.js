@@ -16,6 +16,7 @@ const PROGRAM_URL = new URL('../../data/workouts.json', import.meta.url);
 
 let program = null;
 let exerciseIndex = new Map();   // exerciseId -> { exercise, day }
+let retiredIndex = new Map();    // exerciseId -> exercise (no longer prescribed)
 
 /**
  * Fetch and index the program. Called once during boot.
@@ -41,6 +42,11 @@ export async function load() {
     }
   }
 
+  retiredIndex = new Map();
+  for (const exercise of data.retiredExercises ?? []) {
+    retiredIndex.set(exercise.id, exercise);
+  }
+
   return program;
 }
 
@@ -62,6 +68,15 @@ function validate(data) {
       if (!exercise.reps || typeof exercise.reps.min !== 'number') {
         throw new Error(`Exercise "${exercise.id}" is missing a numeric reps.min.`);
       }
+    }
+  }
+
+  if (data.retiredExercises !== undefined && !Array.isArray(data.retiredExercises)) {
+    throw new Error('workouts.json has a "retiredExercises" that is not an array.');
+  }
+  for (const exercise of data.retiredExercises ?? []) {
+    if (!exercise.id || !exercise.name) {
+      throw new Error('A retired exercise in workouts.json is missing "id" or "name".');
     }
   }
 }
@@ -94,18 +109,40 @@ export function getTodayDay(dayKey = today()) {
   return getDayByWeekday(isoWeekday(dayKey));
 }
 
-/** Look up an exercise across every day. */
+/**
+ * Look up an exercise across every day, then across the retired list.
+ *
+ * The fallback exists because sessions store exercise *ids*: dropping a
+ * movement from the split would otherwise turn every session that logged it
+ * into a raw slug with no loading convention attached, so "150" on a barbell
+ * squat would stop reading as "+150 kg plates". A retired definition is not
+ * prescribed anywhere and never appears in a day, but it still knows what its
+ * own numbers meant, which is what history and PRs need from it.
+ */
 export function getExercise(exerciseId) {
-  return exerciseIndex.get(exerciseId)?.exercise ?? null;
+  return exerciseIndex.get(exerciseId)?.exercise
+    ?? retiredIndex.get(exerciseId)
+    ?? null;
 }
 
-/** The day an exercise belongs to. */
+/** The day an exercise belongs to. Null for a retired movement. */
 export function getExerciseDay(exerciseId) {
   return exerciseIndex.get(exerciseId)?.day ?? null;
 }
 
+/** Every exercise the program currently prescribes. Excludes retired ones. */
 export function getAllExercises() {
   return [...exerciseIndex.values()].map(({ exercise }) => exercise);
+}
+
+/** Movements that were dropped from the split but still have history. */
+export function getRetiredExercises() {
+  return [...retiredIndex.values()];
+}
+
+/** Is this id a movement the program no longer prescribes? */
+export function isRetired(exerciseId) {
+  return retiredIndex.has(exerciseId) && !exerciseIndex.has(exerciseId);
 }
 
 /**

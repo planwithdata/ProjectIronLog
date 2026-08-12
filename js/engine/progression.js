@@ -45,6 +45,10 @@
  *      ladder before they ever take external load. Reaching 12 reps earns
  *      better control, more range, or a harder variation — not a plate.
  *
+ * Which set the next load is measured from is a separate question from all of
+ * the above, and it is the caller's: by default the heaviest completed working
+ * set, or a nominated one via `options.baselineSetIndex`. See `baselineWeight`.
+ *
  * Worked example from the brief, which `tools/test.mjs` asserts directly:
  *
  *   range 6-8, at 27.5 kg, logged 8 / 8 / 7 / 6
@@ -86,6 +90,9 @@ export const DELOAD_LOAD_FACTOR = 0.65;
  * @param {boolean} [options.isDeload]  true during the wave's deload week
  * @param {number}  [options.setCount]  override the prescribed set count
  * @param {object}  [options.loadPrefs] display/increment conventions
+ * @param {number|null} [options.baselineSetIndex]
+ *        Read the load to carry forward from this working set (1-based)
+ *        instead of from the heaviest one. See `baselineWeight`.
  *
  * @returns {{
  *   action: string,
@@ -140,10 +147,15 @@ export function recommend(exercise, history = [], options = {}) {
     };
   }
 
-  const lastWeight = workingWeight(last);
+  const lastWeight = baselineWeight(last, options.baselineSetIndex);
   const lastReps = completedSets(last).map((set) => set.reps ?? 0);
   const previous = {
+    // What the next load is measured from, which is the heaviest completed set
+    // unless a baseline override says otherwise.
     weightKg: lastWeight,
+    // Always the heaviest, so a caller showing "last session" still shows what
+    // was actually lifted rather than the figure the engine chose to build on.
+    topWeightKg: workingWeight(last),
     reps: lastReps,
     date: last.date,
     painLimited: Boolean(last.painLimited),
@@ -156,9 +168,18 @@ export function recommend(exercise, history = [], options = {}) {
 
   const stalledSessions = countStalledSessions(judgeableHistory(working, exercise), range, setCount);
 
+  // When a baseline override actually moved the anchor, say so on the card.
+  // A load that drops without explanation reads as the app losing track of a
+  // session, and the user has no way to tell that from a deliberate reset.
+  const explain = (result) => (
+    lastWeight === previous.topWeightKg
+      ? result
+      : { ...result, reason: `${result.reason} ${baselineNote(options.baselineSetIndex, lastWeight, previous.topWeightKg)}` }
+  );
+
   /* --- Scheduled deload week ------------------------------------------ */
   if (options.isDeload) {
-    return {
+    return explain({
       action: ACTIONS.DELOAD_WAVE,
       weightKg: lastWeight === null
         ? null
@@ -169,14 +190,14 @@ export function recommend(exercise, history = [], options = {}) {
       previous,
       atTopOfRange: atTop,
       stalledSessions,
-    };
+    });
   }
 
   /* --- Stalled: drop and rebuild -------------------------------------- */
   // Checked before the advance branch: a lift that just hit the top of the
   // range has by definition improved, so `stalledSessions` would be 0 there.
   if (stalledSessions >= STALL_SESSIONS && lastWeight) {
-    return {
+    return explain({
       action: ACTIONS.DELOAD_STALL,
       weightKg: roundTo(lastWeight * STALL_RETAIN, increment),
       perSetReps: fill(setCount, range.min),
@@ -185,14 +206,14 @@ export function recommend(exercise, history = [], options = {}) {
       previous,
       atTopOfRange: atTop,
       stalledSessions,
-    };
+    });
   }
 
   /* --- Top of range on every set: add load ---------------------------- */
   if (atTop) {
     if (repsFirst && (lastWeight === null || lastWeight === 0)) {
       // Bodyweight lift graduating to added load for the first time.
-      return {
+      return explain({
         action: ACTIONS.ADVANCE,
         weightKg: increment,
         perSetReps: fill(setCount, range.min),
@@ -201,10 +222,10 @@ export function recommend(exercise, history = [], options = {}) {
         previous,
         atTopOfRange: true,
         stalledSessions,
-      };
+      });
     }
 
-    return {
+    return explain({
       action: ACTIONS.ADVANCE,
       weightKg: (lastWeight ?? 0) + increment,
       perSetReps: fill(setCount, range.min),
@@ -213,11 +234,11 @@ export function recommend(exercise, history = [], options = {}) {
       previous,
       atTopOfRange: true,
       stalledSessions,
-    };
+    });
   }
 
   /* --- Hold the weight, chase reps ------------------------------------ */
-  return {
+  return explain({
     action: repsFirst ? ACTIONS.REPS_FIRST : ACTIONS.HOLD,
     weightKg: lastWeight,
     perSetReps: nextRepTargets(lastReps, setCount, range),
@@ -226,7 +247,18 @@ export function recommend(exercise, history = [], options = {}) {
     previous,
     atTopOfRange: false,
     stalledSessions,
-  };
+  });
+}
+
+/**
+ * One sentence explaining that the load was anchored somewhere other than the
+ * top set. Only ever appended when the two figures actually differ.
+ */
+function baselineNote(setIndex, baseline, top) {
+  const from = baseline === null ? 'bodyweight' : `${trim(baseline)} kg`;
+  const was = top === null ? 'bodyweight' : `${trim(top)} kg`;
+  return `Measured from working set ${setIndex} (${from}) rather than the ${was} top set, `
+    + 'because a working set is a load you repeat, not a limit you probe.';
 }
 
 /**
@@ -297,7 +329,9 @@ export function difficultyRung(exercise, id) {
   return ladder.find((rung) => rung.id === id) ?? ladder[0];
 }
 
-function recommendDifficulty(exercise, history, { isDeload, setCount, increment, range }) {
+function recommendDifficulty(exercise, history, {
+  isDeload, setCount, increment, range, baselineSetIndex,
+}) {
   const ladder = difficultyLadder(exercise);
   const working = history.filter((entry) => !entry.isDeload && completedSets(entry).length > 0);
   const last = working[0] ?? null;
@@ -322,7 +356,7 @@ function recommendDifficulty(exercise, history, { isDeload, setCount, increment,
   }
 
   const lastReps = completedSets(last).map((set) => set.reps ?? 0);
-  const lastWeight = workingWeight(last);
+  const lastWeight = baselineWeight(last, baselineSetIndex);
   const currentId = last.difficulty ?? ladder[0].id;
   const currentIndex = Math.max(0, ladder.findIndex((rung) => rung.id === currentId));
   const current = ladder[currentIndex];
@@ -642,6 +676,35 @@ export function workingWeight(entry) {
     .filter((weight) => weight !== null && weight !== undefined);
   if (!loads.length) return null;
   return Math.max(...loads);
+}
+
+/**
+ * The load the next session should be built on.
+ *
+ * Normally that is `workingWeight` — the heaviest set actually completed —
+ * because someone who works up across their sets is still working at the top
+ * load, and anchoring to set one would stall them.
+ *
+ * `setIndex` (1-based) overrides that with one nominated working set. It exists
+ * for the opposite case: sets logged as a ramp, where the top set was a probe
+ * at a limit rather than a load meant to be repeated four times. Carrying the
+ * probe forward would prescribe a weight that was never held for a working set.
+ *
+ * Falls back to the heaviest set whenever the nominated one cannot answer —
+ * a session with fewer sets than the index, or a bodyweight movement where the
+ * set carries no load. That fallback is why passing an index is always at
+ * worst a no-op, never a hole in the prescription.
+ *
+ * Reads *completed* sets, in the order they were logged, which is the same
+ * sequence every other judgement in this module is made against.
+ */
+export function baselineWeight(entry, setIndex = null) {
+  const top = workingWeight(entry);
+  if (!setIndex || setIndex < 1) return top;
+
+  const nominated = completedSets(entry)[setIndex - 1]?.weightKg;
+  if (nominated === null || nominated === undefined) return top;
+  return nominated;
 }
 
 function summarise(entry) {

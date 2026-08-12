@@ -38,6 +38,7 @@
 
 import * as db from './db.js';
 import { COLLECTIONS } from './db.js';
+import { WORKING_SET_REBASELINE } from '../config.js';
 import { EVENTS, emit } from '../core/events.js';
 import { today, isoWeekday, addDays, daysBetween } from '../core/format.js';
 import * as programService from './program-service.js';
@@ -144,6 +145,33 @@ export function getLastPerformance(exerciseId) {
   return getExerciseHistory(exerciseId, 1)[0] ?? null;
 }
 
+/**
+ * Which working set the engine should measure the next load from, for a
+ * session on `dayKey`. Null means the default — the heaviest completed set.
+ *
+ * This is the whole of the `WORKING_SET_REBASELINE` correction described in
+ * `js/config.js`: a window of `sessions` workouts starting at `fromDate`, after
+ * which the rule retires itself without anyone having to remember to remove it.
+ *
+ * Counted in completed sessions rather than in dates, because the point is a
+ * training week — five workouts — not seven days. A week interrupted by
+ * illness still gets its five, and a week where two sessions land on one day
+ * does not get six.
+ *
+ * The in-progress session is not counted, since it is not completed yet. So the
+ * first workout of the window sees a count of 0 and the sixth sees 5, which is
+ * where the window closes.
+ */
+export function baselineSetIndex(dayKey = today(), rule = WORKING_SET_REBASELINE) {
+  if (!rule?.setIndex || !rule.fromDate) return null;
+  if (dayKey < rule.fromDate) return null;
+
+  const since = getCompletedSessions()
+    .filter((session) => session.date >= rule.fromDate).length;
+
+  return since < rule.sessions ? rule.setIndex : null;
+}
+
 /* --- Session lifecycle -------------------------------------------------- */
 
 /**
@@ -176,7 +204,7 @@ export async function startSession(dayId, dayKey = today()) {
       // sessions that already logged it untouched.
       .filter((exercise) =>
         !programService.isWarmupOnly(exercise) || trainingPrefs.pushupWarmupEnabled())
-      .map((exercise) => buildEntry(exercise, wave)),
+      .map((exercise) => buildEntry(exercise, wave, dayKey)),
   });
 
   emit(EVENTS.WORKOUT_STARTED, { sessionId: session.id, dayId });
@@ -191,7 +219,7 @@ export async function startSession(dayId, dayKey = today()) {
  * well as what was done, and the recommendation must not shift underneath the
  * user as they log earlier sets of the same session.
  */
-function buildEntry(exercise, wave) {
+function buildEntry(exercise, wave, dayKey = today()) {
   const history = getExerciseHistory(exercise.id, 6);
   const loadPrefs = trainingPrefs.getLoadPrefs();
 
@@ -223,6 +251,7 @@ function buildEntry(exercise, wave) {
     isDeload: wave.isDeload,
     setCount,
     loadPrefs,
+    baselineSetIndex: baselineSetIndex(dayKey),
   });
 
   return {
@@ -302,6 +331,7 @@ export function getRecommendation(exercise, dayKey = today()) {
     isDeload: wave.isDeload,
     setCount,
     loadPrefs: trainingPrefs.getLoadPrefs(),
+    baselineSetIndex: baselineSetIndex(dayKey),
   });
 }
 

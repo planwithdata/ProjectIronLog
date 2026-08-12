@@ -347,8 +347,18 @@
     check('dumbbell total shown per hand',
       formatLoad(describeLoad(incline, 55), 'kg'), '27.5 kg / hand');
     check('barbell shown as plates',
-      formatLoad(describeLoad(programService.getExercise('back-squat'), 40), 'kg'),
+      formatLoad(describeLoad(programService.getExercise('romanian-deadlift'), 40), 'kg'),
       '+40 kg plates');
+    // A movement dropped from the split still has to know what its own logged
+    // numbers meant, or every session that recorded it reads as a bare slug.
+    check('a retired movement still resolves',
+      programService.getExercise('back-squat')?.name, 'Back Squat');
+    check('and keeps its loading convention',
+      formatLoad(describeLoad(programService.getExercise('back-squat'), 150), 'kg'),
+      '+150 kg plates');
+    check('but is not prescribed anywhere',
+      programService.getAllExercises().some((e) => e.id === 'back-squat'), false);
+    check('and is flagged as retired', programService.isRetired('back-squat'), true);
     check('machine value shown raw',
       formatLoad(describeLoad(programService.getExercise('leg-press'), 200), 'kg'),
       '200 kg');

@@ -6,13 +6,6 @@
     ],
     "source": "Barbell Ab Rollout - On Knees"
   },
-  "back-squat": {
-    "frames": [
-      "back-squat-1.webp",
-      "back-squat-2.webp"
-    ],
-    "source": "Barbell Squat"
-  },
   "bulgarian-split-squat": {
     "frames": [
       "bulgarian-split-squat-1.webp",
@@ -75,6 +68,13 @@
       "flat-dumbbell-bench-press-2.webp"
     ],
     "source": "Dumbbell Bench Press"
+  },
+  "hack-squat": {
+    "frames": [
+      "hack-squat-1.webp",
+      "hack-squat-2.webp"
+    ],
+    "source": "Hack Squat"
   },
   "hammer-curl": {
     "frames": [

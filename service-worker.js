@@ -23,7 +23,7 @@
  * service worker runs outside the module graph and cannot import it.
  */
 
-const CACHE_VERSION = 'v1.7.0';
+const CACHE_VERSION = 'v1.7.1';
 const CACHE_NAME = `ironlog-${CACHE_VERSION}`;
 
 /**

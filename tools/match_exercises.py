@@ -38,7 +38,7 @@ ALIASES = {
     'hammer-curl': ['Hammer Curls', 'Cross Body Hammer Curl'],
     'face-pull': ['Face Pull'],
 
-    'back-squat': ['Barbell Squat', 'Barbell Full Squat'],
+    'hack-squat': ['Hack Squat', 'Narrow Stance Hack Squats'],
     'bulgarian-split-squat': ['Split Squat with Dumbbells', 'One Leg Barbell Squat'],
     'leg-press': ['Leg Press', 'Narrow Stance Leg Press'],
     'leg-extension': ['Leg Extensions'],

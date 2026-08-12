@@ -4,6 +4,67 @@ All notable changes to Project IronLog. Follows [Semantic Versioning](https://se
 
 ---
 
+## [1.7.1] — 2026-08-13 — Second-set baseline, and Hack Squat
+
+Two changes to what gets prescribed. No stored session, weigh-in, photo, note or
+record is touched by either, and no schema version moves.
+
+### Changed
+
+**The coming week is baselined from the second working set**
+(`js/config.js` → `WORKING_SET_REBASELINE`, `engine/progression.baselineWeight`)
+
+- Week 1 was logged as a ramp *inside* the working sets — `150/180/200/220` on
+  the squat, `43/57/63` on a row — because the top set was being used to find a
+  limit rather than to train at. `workingWeight` carries the heaviest completed
+  working set forward, so left alone the engine would have prescribed that
+  one-off probe as the load for *every* set of the coming week.
+- For the first five sessions from 2026-08-13, the load is measured from working
+  set **2** of the previous performance instead. On Thursday's legs that is
+  160 kg on the leg press rather than 200; on Saturday, 57 kg on the seated row
+  rather than 70.
+- **It expires by itself.** After those five completed sessions the rule stops
+  applying and ordinary double progression resumes, from whatever was logged
+  under it — which by then is a repeatable working load rather than a probe.
+  Nothing has to be remembered or removed.
+- Scoped tightly on purpose. Rep targets, stall detection, deload arithmetic,
+  PRs, volume and history are all unchanged: the override moves *where the next
+  load is measured from*, and nothing else. A card whose load moved says so, in
+  words, rather than quietly showing a smaller number.
+- Pyramid prescriptions (Cable Lateral Raise) are unaffected — they already
+  carry a load per rung, so there is no top set standing in for the others.
+
+**Hack Squat replaces Back Squat** (`data/workouts.json`, Thursday)
+
+- A different movement on a different machine, so it takes a **new id** and
+  starts its own load history rather than inheriting the barbell's. 220 kg of
+  plates is not 220 on a hack sled, and silently carrying the number across
+  would be the app inventing a lift that never happened.
+- Logged as a raw machine value with no bar weight, per the loading conventions.
+- Two illustrations, from the same public-domain source as the other 36.
+
+### Added
+
+**Retired exercises** (`data/workouts.json` → `retiredExercises`, optional)
+
+- A movement dropped from the split keeps its definition in a separate list.
+  `programService.getExercise` falls back to it, so the five Back Squat sessions
+  already logged still show their name and still read as `+150 kg plates` rather
+  than degrading to a bare `back-squat` slug with unlabelled numbers.
+- Retired movements are excluded from `getAllExercises`, from every day, and
+  from the program browser — they are history, not prescription — but they stay
+  in the PR feed. Dropping a lift does not un-lift the heaviest set of it.
+
+### Fixed
+
+- `tools/fetch_illustrations.py` now crops a source frame to 3:2 before
+  downscaling, biased a quarter of the way down. The card pins artwork to 3:2
+  with `object-fit: cover`, so a square source was going to be cropped
+  regardless; doing it at bake time chooses where, instead of letting the
+  browser take the top of someone's head off.
+
+---
+
 ## [1.7.0] — 2026-08-12 — Warm-up, working and intensity sets
 
 Session 6. The app now distinguishes the three kinds of work in a session, and

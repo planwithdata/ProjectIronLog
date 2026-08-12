@@ -99,10 +99,17 @@ export function getRecordsFor(exerciseId) {
   return { exerciseId, name: exercise?.name ?? exerciseId, weight, reps, e1rm, volume };
 }
 
-/** Records for every exercise in the program that has history. */
+/**
+ * Records for every exercise that has history.
+ *
+ * Retired movements are included. A record is a thing that happened; dropping
+ * the Back Squat from the split does not un-lift the heaviest set of it, and
+ * silently deleting that PR would make the feed a record of the current program
+ * rather than of the training. `getRecordsFor` returns null for anything never
+ * logged, so a retired movement with no history costs nothing.
+ */
 export function getAllRecords() {
-  return programService
-    .getAllExercises()
+  return [...programService.getAllExercises(), ...programService.getRetiredExercises()]
     .map((exercise) => getRecordsFor(exercise.id))
     .filter(Boolean);
 }

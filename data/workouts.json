@@ -15,7 +15,8 @@
       "Tuesday: Push-ups added as an optional pre-workout warm-up (1-2 sets, 8-15 reps, not to failure). Not counted as chest working sets or as hypertrophy volume.",
       "Ab Wheel Rollout progresses by difficulty rather than by load: build clean reps, then control and range, then a harder variation, and only then external resistance.",
       "Pull-ups are logged pain-aware: fewer pain-free reps, an incomplete set or a switch to a pulldown are all valid outcomes and are not read as a strength regression.",
-      "Ramp-up sets, drop sets and failure sets are recorded separately from working sets. Only working sets drive progressive overload."
+      "Ramp-up sets, drop sets and failure sets are recorded separately from working sets. Only working sets drive progressive overload.",
+      "Thursday: Hack Squat replaces Back Squat. It is a different movement on a different machine, so it starts its own load history rather than inheriting the barbell's — the Back Squat sessions already logged stay in the record under \"retiredExercises\"."
     ],
     "review": {
       "everyDays": 14,
@@ -90,6 +91,30 @@
     "If a missed day would otherwise force 3 straight lifting days in a row, drop that week's Friday recovery walk/mobility session instead of skipping a lifting day.",
     "If you miss two days in a row, don't cram both sessions back-to-back - just resume the split from wherever you are and let the missed session roll into next week.",
     "Don't add extra volume elsewhere to 'make up' for a skipped muscle group - one missed session per month has minimal impact on progress; doubling up elsewhere risks overtraining."
+  ],
+
+  "retiredExercises": [
+    {
+      "id": "back-squat",
+      "retiredOn": "2026-08-13",
+      "replacedBy": "hack-squat",
+      "name": "Back Squat",
+      "equipment": "barbell",
+      "loadType": "total",
+      "loadEntry": "plates",
+      "intensityTechniquesAllowed": false,
+      "barWeightKg": 20,
+      "warmup": { "supported": true, "rampSets": 3 },
+      "category": "compound",
+      "primaryMuscles": ["Quads"],
+      "secondaryMuscles": ["Glutes", "Core"],
+      "sets": 4,
+      "reps": { "min": 6, "max": 8, "perSide": false, "label": "6-8" },
+      "rest": { "seconds": 150, "minSeconds": 120, "maxSeconds": 180, "label": "2-3 min" },
+      "progression": { "mode": "weight", "increment": { "min": 2.5, "max": 5 }, "label": "+2.5-5 kg" },
+      "cues": ["Bar rests on the upper shoulders, feet about shoulder-width.", "Brace the core before you descend."],
+      "notes": ""
+    }
   ],
 
   "days": [
@@ -497,24 +522,23 @@
       ],
       "exercises": [
         {
-          "id": "back-squat",
+          "id": "hack-squat",
           "order": 1,
-          "name": "Back Squat",
-          "equipment": "barbell",
+          "name": "Hack Squat",
+          "equipment": "machine",
           "loadType": "total",
-          "loadEntry": "plates",
+          "loadEntry": "machine",
           "intensityTechniquesAllowed": false,
-          "barWeightKg": 20,
           "warmup": { "supported": true, "rampSets": 3 },
           "category": "compound",
           "primaryMuscles": ["Quads"],
-          "secondaryMuscles": ["Glutes", "Core"],
+          "secondaryMuscles": ["Glutes", "Hamstrings"],
           "sets": 4,
           "reps": { "min": 6, "max": 8, "perSide": false, "label": "6-8" },
           "rest": { "seconds": 150, "minSeconds": 120, "maxSeconds": 180, "label": "2-3 min" },
           "progression": { "mode": "weight", "increment": { "min": 2.5, "max": 5 }, "label": "+2.5-5 kg" },
-          "cues": ["Bar rests on the upper shoulders, feet about shoulder-width.", "Brace the core before you descend."],
-          "notes": ""
+          "cues": ["Back flat on the pad, feet mid-platform at about shoulder width.", "Brace, descend to just past 90 degrees, then drive through the heels."],
+          "notes": "The load is the reading on this machine's sled and is not comparable to a barbell squat."
         },
         {
           "id": "bulgarian-split-squat",

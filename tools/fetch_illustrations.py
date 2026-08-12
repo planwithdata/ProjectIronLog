@@ -40,7 +40,17 @@ MAP_PATH = 'tools/exercise-image-map.json'
 # 440px stays sharp at 2x on the widest card the layout produces, and the pair
 # sits side by side so each frame only ever needs half the card width.
 TARGET_WIDTH = 440
+TARGET_ASPECT = 3 / 2
 WEBP_QUALITY = 76
+
+# Where to take the 3:2 window from when a source frame is taller than that.
+# `.ex-art__frame` in css/workout.css pins the card to 3:2 with object-fit:
+# cover, so a square source is cropped one way or another — doing it here means
+# choosing where, and writing files whose real dimensions match the CSS instead
+# of leaving the browser to centre-crop a head off. A quarter of the way down
+# rather than the middle because these photographs frame a standing figure with
+# more floor beneath them than air above.
+CROP_BIAS = 0.25
 
 
 def fetch(url, attempts=3):
@@ -58,6 +68,12 @@ def fetch(url, attempts=3):
 
 def optimise(raw, out_path):
     image = Image.open(io.BytesIO(raw)).convert('RGB')
+
+    # Most of the source set is already 3:2, so this is a no-op for them.
+    window = round(image.width / TARGET_ASPECT)
+    if image.height > window:
+        top = round((image.height - window) * CROP_BIAS)
+        image = image.crop((0, top, image.width, top + window))
 
     if image.width > TARGET_WIDTH:
         height = round(image.height * TARGET_WIDTH / image.width)

@@ -23,6 +23,7 @@ import {
   incrementFor,
   programIncrement,
   workingWeight,
+  baselineWeight,
   ACTIONS,
 } from '../js/engine/progression.js';
 
@@ -318,6 +319,120 @@ test('workingWeight is null for unloaded bodyweight work', () => {
   assert.equal(workingWeight({
     sets: [{ weightKg: null, reps: 10, completed: true }],
   }), null);
+});
+
+/* --- Baseline set override ---------------------------------------------
+   The other half of "which weight do we carry forward". Sets logged as a ramp
+   put a one-off probe at the top, and `workingWeight` would prescribe that
+   probe for every set of the next session. `baselineSetIndex` nominates the
+   set to build on instead. See js/config.WORKING_SET_REBASELINE.
+   ====================================================================== */
+
+/** A ramped session: one load per set, as Rish logged Week 1. */
+function ramp(weights, reps, { date = '2026-08-01' } = {}) {
+  return {
+    date,
+    isDeload: false,
+    sets: weights.map((weightKg, index) => ({
+      weightKg,
+      reps: reps[index],
+      completed: true,
+    })),
+  };
+}
+
+test('baselineWeight defaults to the heaviest completed set', () => {
+  assert.equal(baselineWeight(ramp([150, 180, 200, 220], [12, 10, 8, 6])), 220);
+});
+
+test('baselineWeight reads the nominated set, 1-based', () => {
+  const entry = ramp([150, 180, 200, 220], [12, 10, 8, 6]);
+  assert.equal(baselineWeight(entry, 1), 150);
+  assert.equal(baselineWeight(entry, 2), 180);
+  assert.equal(baselineWeight(entry, 4), 220);
+});
+
+test('baselineWeight takes the nominated set even when a later one is lighter', () => {
+  // Logged 36/57/50: set 2 is the heaviest here, and the rule still says set 2.
+  assert.equal(baselineWeight(ramp([36, 57, 50], [12, 7, 10]), 2), 57);
+});
+
+test('baselineWeight counts completed sets only, in logged order', () => {
+  const entry = {
+    date: '2026-08-01',
+    sets: [
+      { weightKg: 11.3, reps: 12, completed: true },
+      { weightKg: 15.9, reps: 4, completed: false },   // abandoned, skipped
+      { weightKg: 13.6, reps: 10, completed: true },
+    ],
+  };
+  assert.equal(baselineWeight(entry, 2), 13.6);
+});
+
+test('baselineWeight falls back to the heaviest set when the index cannot answer', () => {
+  const short = ramp([40], [8]);
+  assert.equal(baselineWeight(short, 2), 40, 'fewer sets than the index');
+
+  const bodyweight = { date: '2026-08-01', sets: [
+    { weightKg: null, reps: 6, completed: true },
+    { weightKg: null, reps: 6, completed: true },
+  ] };
+  assert.equal(baselineWeight(bodyweight, 2), null, 'nothing loaded to read');
+
+  assert.equal(baselineWeight(ramp([20, 25], [8, 8]), 0), 25, 'index 0 is not a set');
+});
+
+test('a rebaselined hold prescribes the second set, not the top set', () => {
+  const squat = exercise({
+    id: 'back-squat', equipment: 'barbell', loadEntry: 'plates', sets: 4,
+  });
+  const week1 = [ramp([150, 180, 200, 220], [12, 10, 8, 6])];
+
+  const asLogged = recommend(squat, week1, { setCount: 4 });
+  assert.equal(asLogged.weightKg, 220, 'unchanged without the override');
+
+  const rebased = recommend(squat, week1, { setCount: 4, baselineSetIndex: 2 });
+  assert.equal(rebased.action, ACTIONS.HOLD);
+  assert.equal(rebased.weightKg, 180);
+  assert.match(rebased.reason, /working set 2/, 'the card has to say why the load dropped');
+  assert.equal(rebased.previous.topWeightKg, 220, 'what was lifted is still reported');
+});
+
+test('a rebaselined advance adds the increment to the second set', () => {
+  const press = exercise({ sets: 3 });                      // dumbbells, +2.5/hand
+  const atTop = [ramp([40, 50, 55], [8, 8, 8])];
+
+  const rebased = recommend(press, atTop, { setCount: 3, baselineSetIndex: 2 });
+  assert.equal(rebased.action, ACTIONS.ADVANCE);
+  assert.equal(rebased.weightKg, 55, '50 kg + the 5 kg stored step');
+});
+
+test('the override is a no-op on sets that were already flat', () => {
+  const flat = [performance(27.5, [8, 8, 7, 6])];
+  const plain = recommend(exercise(), flat);
+  const rebased = recommend(exercise(), flat, { baselineSetIndex: 2 });
+
+  assert.deepEqual(rebased, plain, 'same prescription, and no note bolted on');
+});
+
+test('the override leaves rep targets and stall detection alone', () => {
+  const history = [
+    ramp([150, 180, 200], [8, 8, 7], { date: '2026-08-01' }),
+    ramp([150, 180, 200], [8, 8, 7], { date: '2026-07-25' }),
+    ramp([150, 180, 200], [8, 8, 7], { date: '2026-07-18' }),
+    ramp([150, 180, 200], [8, 8, 7], { date: '2026-07-11' }),
+  ];
+  const squat = exercise({ equipment: 'barbell', loadEntry: 'plates', sets: 3 });
+
+  const plain = recommend(squat, history, { setCount: 3 });
+  const rebased = recommend(squat, history, { setCount: 3, baselineSetIndex: 2 });
+
+  assert.equal(plain.action, ACTIONS.DELOAD_STALL, 'four flat sessions is a stall');
+  assert.equal(rebased.action, plain.action, 'the override does not hide a stall');
+  assert.equal(rebased.stalledSessions, plain.stalledSessions);
+  assert.deepEqual(rebased.perSetReps, plain.perSetReps);
+  // 180 x 0.9 = 162, rounded to the 2.5 kg step. Off 200 it would be 180.
+  assert.equal(rebased.weightKg, 162.5, '10% off the 180 kg baseline, not off 200');
 });
 
 /* --- earnedAdvance ----------------------------------------------------- */

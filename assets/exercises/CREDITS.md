@@ -11,7 +11,6 @@ Images were downscaled to 440px wide and re-encoded as WebP (quality 76) so they
 | Exercise in this program | Source exercise |
 |---|---|
 | ab-wheel-rollout | Barbell Ab Rollout - On Knees |
-| back-squat | Barbell Squat |
 | bulgarian-split-squat | Split Squat with Dumbbells |
 | cable-crunch | Cable Crunch |
 | cable-lateral-raise | Side Lateral Raise |
@@ -21,6 +20,7 @@ Images were downscaled to 440px wide and re-encoded as WebP (quality 76) so they
 | ez-bar-skull-crusher | EZ-Bar Skullcrusher |
 | face-pull | Face Pull |
 | flat-dumbbell-bench-press | Dumbbell Bench Press |
+| hack-squat | Hack Squat |
 | hammer-curl | Hammer Curls |
 | hanging-knee-raise | Hanging Leg Raise |
 | hip-thrust | Barbell Hip Thrust |
