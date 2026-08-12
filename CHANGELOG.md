@@ -4,10 +4,12 @@ All notable changes to Project IronLog. Follows [Semantic Versioning](https://se
 
 ---
 
-## [1.7.1] — 2026-08-13 — Second-set baseline, and Hack Squat
+## [1.8.0] — 2026-08-13 — Second-set baseline, and Hack Squat
 
-Two changes to what gets prescribed. No stored session, weigh-in, photo, note or
-record is touched by either, and no schema version moves.
+Changes to what gets prescribed, and one correction to what was logged. Not a
+single weight, rep count, completion flag, RPE, date or note is altered
+anywhere; the one thing that moves is which exercise a set of week-one entries
+says it belongs to, and that is a schema migration with its own tests.
 
 ### Changed
 
@@ -21,8 +23,8 @@ record is touched by either, and no schema version moves.
   one-off probe as the load for *every* set of the coming week.
 - For the first five sessions from 2026-08-13, the load is measured from working
   set **2** of the previous performance instead. On Thursday's legs that is
-  160 kg on the leg press rather than 200; on Saturday, 57 kg on the seated row
-  rather than 70.
+  180 kg on the hack squat rather than 220 and 160 kg on the leg press rather
+  than 200; on Saturday, 57 kg on the seated row rather than 70.
 - **It expires by itself.** After those five completed sessions the rule stops
   applying and ordinary double progression resumes, from whatever was logged
   under it — which by then is a repeatable working load rather than a probe.
@@ -36,21 +38,45 @@ record is touched by either, and no schema version moves.
 
 **Hack Squat replaces Back Squat** (`data/workouts.json`, Thursday)
 
-- A different movement on a different machine, so it takes a **new id** and
-  starts its own load history rather than inheriting the barbell's. 220 kg of
-  plates is not 220 on a hack sled, and silently carrying the number across
-  would be the app inventing a lift that never happened.
-- Logged as a raw machine value with no bar weight, per the loading conventions.
+- Logged as a raw machine value with no bar weight, per the loading conventions:
+  a sled's carriage weight is a property of that specific machine, and inventing
+  a 20 kg bar for it would present a guess as a measurement.
 - Two illustrations, from the same public-domain source as the other 36.
+
+**Week one's squats were hack squats** — schema **v2 → v3**
+(`db.migrateV2ToV3`)
+
+- They were trained as hack squats and logged under Back Squat, which was the
+  movement occupying the Thursday slot at the time. The migration points those
+  entries at `hack-squat`.
+- **A relabel, not a recalculation.** Every load, rep, tick, RPE, note and
+  ordering survives byte for byte; only the `exerciseId` moves. What changes is
+  what that id *means*: `150` stops being labelled `+150 kg plates · est. total
+  170 kg` and reads as the raw machine value it always was.
+- It runs at boot **and on import**, so restoring the existing `ironlog-backup-*`
+  JSON — which still says `back-squat` — lands as Hack Squat either way. The
+  usual pre-migration parachute is written first, and is downloadable from
+  Settings → Data.
+- Applied to sessions, coach notes and the PR cache. Not to `reviews`: a
+  generated review is a dated snapshot of what the app said at the time, and
+  editing one after the fact makes it a record of nothing.
+- Idempotent, and it refuses to collide: a session somehow holding both ids
+  keeps the old entry exactly where it is and logs a warning, rather than
+  producing a duplicate the rest of the app would silently mis-read.
+- Consequence worth knowing: Hack Squat now *has* history, so Thursday is
+  prescribed rather than a blank first session — 180 kg for 8/8/8/7 under the
+  second-set baseline above.
 
 ### Added
 
 **Retired exercises** (`data/workouts.json` → `retiredExercises`, optional)
 
-- A movement dropped from the split keeps its definition in a separate list.
-  `programService.getExercise` falls back to it, so the five Back Squat sessions
-  already logged still show their name and still read as `+150 kg plates` rather
-  than degrading to a bare `back-squat` slug with unlabelled numbers.
+- A movement dropped from the split keeps its definition in a separate list, and
+  `programService.getExercise` falls back to it.
+- With the relabel above nothing should resolve there any more. It stays as a
+  fallback: a stale id arriving from an old export, or an entry the migration
+  declined to touch, still reads as a named barbell lift rather than a bare
+  `back-squat` slug with unlabelled numbers.
 - Retired movements are excluded from `getAllExercises`, from every day, and
   from the program browser — they are history, not prescription — but they stay
   in the PR feed. Dropping a lift does not un-lift the heaviest set of it.

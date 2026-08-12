@@ -7,7 +7,7 @@
  */
 
 export const APP_NAME = 'Project IronLog';
-export const APP_VERSION = '1.7.1';
+export const APP_VERSION = '1.8.0';
 
 /** Session of the staged build plan that this code delivers. */
 export const BUILD_SESSION = 6;

@@ -1,6 +1,6 @@
 # TODO
 
-Version 1.7.1 is complete. What follows is what is genuinely open, not a
+Version 1.8.0 is complete. What follows is what is genuinely open, not a
 wish-list. `ROADMAP.md` holds the post-1.0 candidates.
 
 ---
@@ -30,7 +30,7 @@ wish-list. `ROADMAP.md` holds the post-1.0 candidates.
       to reconcile on the same lifter, so either they mean something other than
       plates on a bar, or they are a mislog. **The app has changed nothing and
       will change nothing** — it preserves and displays exactly what was entered.
-      Editing the session in History fixes it if it is wrong. 1.7.1 takes some of
+      Editing the session in History fixes it if it is wrong. 1.8.0 takes some of
       the sting out of this: the coming week is baselined from the *second*
       working set rather than the heaviest, so a single mistyped top set no
       longer sets the whole week's prescription.

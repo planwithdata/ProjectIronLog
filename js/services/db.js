@@ -22,7 +22,7 @@ import { EVENTS, emit } from '../core/events.js';
 import { SET_KIND } from '../engine/set-model.js';
 
 /** Current schema version. Bump when a migration is added below. */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /**
  * Reserved storage key holding a verbatim copy of the database as it was
@@ -151,6 +151,8 @@ const MIGRATIONS = [
   (snapshot) => snapshot,
   // index 1: v1 -> v2 (warm-up / working / intensity set model)
   migrateV1ToV2,
+  // index 2: v2 -> v3 (week one's squats were hack squats, logged as back squats)
+  migrateV2ToV3,
 ];
 
 /**
@@ -219,6 +221,94 @@ function upgradeEntryToV2(entry) {
     pain: entry.pain ?? null,
     difficulty: entry.difficulty ?? null,
   };
+}
+
+/**
+ * Exercise ids that were logged against the wrong movement, and what they
+ * should have said. Data rather than code, so the *reason* for each one can be
+ * written next to it and a future correction is a line rather than a function.
+ */
+const V3_EXERCISE_RENAMES = {
+  // Rish trained hack squats in week one and logged them under Back Squat,
+  // which was the movement occupying the Thursday slot at the time. The numbers
+  // (150 / 180 / 200 / 220) were always readings off a hack squat sled; they
+  // were merely filed under a barbell.
+  'back-squat': 'hack-squat',
+};
+
+/**
+ * v2 -> v3: point mislogged entries at the movement that was actually trained.
+ *
+ * **A relabel, not a recalculation.** Not one weight, rep count, completion
+ * flag, RPE, kind, date, note or ordering is touched — only the `exerciseId`
+ * an entry points at. What changes downstream is only what that id *means*:
+ * `150` stops being labelled `+150 kg plates · est. total 170 kg` and starts
+ * reading as the raw machine value it always was, and the week's history
+ * attaches to Hack Squat, where the progression engine can use it.
+ *
+ * Applied to every collection that stores an exercise id — sessions, coach
+ * notes, the derived PR cache. Not to `reviews`: a generated review is a dated
+ * snapshot of what the app said at the time, and editing one after the fact
+ * would make it a record of nothing.
+ *
+ * Idempotent, and refuses to collide. An entry already pointing at the new id
+ * is left alone; and if a session somehow holds *both* ids, the old one is left
+ * exactly where it is rather than merged into a duplicate the rest of the app
+ * would silently mis-read (`entries.find` returns one of two). That case cannot
+ * arise from Rish's data, but a migration that corrupts on a surprise is worse
+ * than one that declines and says so.
+ */
+function migrateV2ToV3(snapshot) {
+  const sessions = snapshot[COLLECTIONS.SESSIONS];
+  if (Array.isArray(sessions)) {
+    snapshot[COLLECTIONS.SESSIONS] = sessions.map(renameSessionExercises);
+  }
+
+  const notes = snapshot[COLLECTIONS.COACH_NOTES];
+  if (Array.isArray(notes)) {
+    snapshot[COLLECTIONS.COACH_NOTES] = notes.map((note) => {
+      const renamed = note?.exerciseId ? V3_EXERCISE_RENAMES[note.exerciseId] : null;
+      return renamed ? { ...note, exerciseId: renamed } : note;
+    });
+  }
+
+  const records = snapshot[COLLECTIONS.PERSONAL_RECORDS];
+  if (isPlainObject(records)) {
+    snapshot[COLLECTIONS.PERSONAL_RECORDS] = Object.fromEntries(
+      Object.entries(records).map(([id, value]) => {
+        const renamed = V3_EXERCISE_RENAMES[id];
+        // Never overwrite a record the new id already holds.
+        return [renamed && !(renamed in records) ? renamed : id, value];
+      })
+    );
+  }
+
+  return snapshot;
+}
+
+function renameSessionExercises(session) {
+  if (!session || !Array.isArray(session.entries)) return session;
+
+  const present = new Set(session.entries.map((entry) => entry?.exerciseId));
+  let changed = false;
+
+  const entries = session.entries.map((entry) => {
+    const renamed = entry?.exerciseId ? V3_EXERCISE_RENAMES[entry.exerciseId] : null;
+    if (!renamed) return entry;
+
+    if (present.has(renamed)) {
+      console.warn(
+        `[db] session ${session.id} holds both "${entry.exerciseId}" and "${renamed}"; ` +
+        'leaving the older entry alone rather than creating a duplicate.'
+      );
+      return entry;
+    }
+
+    changed = true;
+    return { ...entry, exerciseId: renamed };
+  });
+
+  return changed ? { ...session, entries } : session;
 }
 
 function isPlainObject(value) {

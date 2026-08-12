@@ -16,7 +16,7 @@
       "Ab Wheel Rollout progresses by difficulty rather than by load: build clean reps, then control and range, then a harder variation, and only then external resistance.",
       "Pull-ups are logged pain-aware: fewer pain-free reps, an incomplete set or a switch to a pulldown are all valid outcomes and are not read as a strength regression.",
       "Ramp-up sets, drop sets and failure sets are recorded separately from working sets. Only working sets drive progressive overload.",
-      "Thursday: Hack Squat replaces Back Squat. It is a different movement on a different machine, so it starts its own load history rather than inheriting the barbell's — the Back Squat sessions already logged stay in the record under \"retiredExercises\"."
+      "Thursday: Hack Squat replaces Back Squat. Week one's squats were hack squats logged under the movement that occupied the slot at the time, so the v2 -> v3 migration relabels those entries; the loads move with them untouched and are now read as machine values rather than as plates on a bar."
     ],
     "review": {
       "everyDays": 14,
@@ -95,6 +95,7 @@
 
   "retiredExercises": [
     {
+      "_note": "Kept as a fallback, not as a home for history: the v2 -> v3 migration relabels every logged back-squat entry to hack-squat, so nothing should resolve here. It stays so that a stale id arriving from an old export, or an entry the migration declined to touch, still reads as a named barbell lift instead of a bare slug with unlabelled numbers.",
       "id": "back-squat",
       "retiredOn": "2026-08-13",
       "replacedBy": "hack-squat",
