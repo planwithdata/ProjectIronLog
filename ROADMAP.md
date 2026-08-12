@@ -1,7 +1,8 @@
 # Roadmap
 
-Five build sessions to version 1.0. Each one ships something that works on its
-own and is committed separately.
+Five build sessions to version 1.0, then Session 6 to make the app match how
+its user actually trains. Each one ships something that works on its own and is
+committed separately.
 
 ---
 
@@ -90,6 +91,39 @@ own and is committed separately.
 - [x] Documentation — README, ROADMAP, CHANGELOG, TODO
 - [x] Final review
 
+## Session 6 — How Rish actually trains ✅ complete
+
+Version 1.0 was a faithful implementation of the program document. Session 6 is
+where the app stopped assuming the document was the whole story. Driven entirely
+by how the first week of real logging actually looked.
+
+- [x] **Warm-up / working / intensity split in the data model**, not just the UI —
+      `warmupSets`, `sets`, `intensitySets` as separate arrays, so the
+      progression engine cannot see anything but working sets
+- [x] Ramp-up sets, pre-filled at 40/60/80% for the compounds the program
+      prescribes them for, addable to any exercise
+- [x] Drop-set sequences (multi-stage, failure recorded on the first rung) and
+      single failure sets — optional, per-exercise, never prescribed
+- [x] **Load conventions**: plates for a barbell, total-of-both for dumbbells
+      shown per hand, raw values for machines and cables, added load only for
+      bodyweight — all display-side, none rewriting a stored number
+- [x] Dumbbell increments applied per hand, so recommendations land on real pairs
+- [x] Pain-aware logging: score, location, action, substitution — excluded from
+      stall detection and from the review's strength comparison
+- [x] Difficulty-first progression for the ab wheel, with load as the last rung
+- [x] Optional push-up warm-up before chest, contributing nothing to working
+      volume by construction
+- [x] Morning weigh-in reminder — and the **weight entry UI that had been missing
+      since Session 1**, plus a Body tab for all ten scale metrics
+- [x] Training Preferences: fourteen conventions, stored and editable
+- [x] Reports that keep warm-up, working and intensity volume apart
+- [x] Backup safety: last-backup date, and a pre-upgrade parachute
+- [x] **Schema v1 → v2 migration**, strictly additive, idempotent, and asserted
+      against the real exported backup
+- [x] Manual reclassification for pre-upgrade sets, because the app refuses to
+      guess which of them were ramps
+- [x] 121 engine assertions, 117 integration assertions
+
 ---
 
 ## Version 1.0 — complete
@@ -104,6 +138,7 @@ All five sessions delivered. What ships:
 - A rule-based two-week review with a traceable recommendation
 - Installable, offline-capable, no backend, no account, no tracking
 - 62 engine assertions, 84 integration assertions, a clean accessibility audit
+  (121 and 117 respectively as of Session 6)
 
 ## Beyond 1.0
 
@@ -114,10 +149,24 @@ Not committed to, recorded so the decisions are not re-litigated later:
 - **Exercise illustrations.** The source documents contain photo collages
   rather than per-exercise artwork. Would need either licensed art or
   hand-drawn SVGs.
-- **Apple Health import** for body weight, so the morning weigh-in is not
-  typed twice.
-- **Plate calculator** for barbell lifts.
 - **Alternate programs.** Already supported by the data model — a second
   `workouts.json` and a program picker is all it needs.
-- **Warm-up set tracking.** Deliberately excluded for now: the program says
-  ramp-up sets are not counted, and logging them would dilute volume trends.
+- ~~**Warm-up set tracking.** Deliberately excluded for now: the program says
+  ramp-up sets are not counted, and logging them would dilute volume trends.~~
+  **Done in Session 6** — and the reasoning above turned out to be the wrong
+  conclusion from the right premise. Ramp-up sets genuinely must not count
+  towards volume or progression; that is an argument for tracking them
+  *separately*, not for not tracking them. Logging them into their own array
+  dilutes nothing.
+- **A plausibility warning on a logged load.** `workingWeight` anchors the engine
+  to the heaviest completed working set, so one mistyped number quietly becomes
+  the prescription. Week one contains a 220 kg squat next to a 27.5 kg/hand
+  incline press — whether or not that is a mislog, the app should be able to
+  say "that is a 40% jump, is it right?" without refusing the entry.
+- **Pain history rather than a pain note.** Today it is one log per exercise per
+  session. A trend line for a recurring elbow would be more useful, and would
+  need its own collection.
+- **Plate calculator** for barbell lifts — now that the app knows a logged
+  barbell number is plates and what the bar weighs, this is a small addition.
+- **Apple Health import** for body weight, so the morning weigh-in is not typed
+  twice.

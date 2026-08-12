@@ -7,14 +7,16 @@
  * report-flavoured exports (CSV, PDF) belong to Session 4.
  */
 
-import { el, icon } from '../core/dom.js';
+import { el, icon, replace } from '../core/dom.js';
 import { refresh } from '../core/router.js';
 import { toast } from '../core/events.js';
+import { formatDate, relativeDay } from '../core/format.js';
 
 import { download, stampedName, formatBytes } from '../core/download.js';
 import * as db from '../services/db.js';
 import * as settingsService from '../services/settings-service.js';
 import { THEMES, UNITS } from '../services/settings-service.js';
+import * as trainingPrefs from '../services/training-prefs-service.js';
 import * as programService from '../services/program-service.js';
 import { APP_VERSION, BUILD_SESSION } from '../config.js';
 import * as pwa from '../services/pwa-service.js';
@@ -28,10 +30,134 @@ export function render() {
   return el('div.page.enter', {}, [
     installSection(),
     appearanceSection(),
+    trainingSection(),
     profileSection(),
     dataSection(),
     aboutSection(),
   ]);
+}
+
+/* --- Training preferences ----------------------------------------------
+   How this user trains. Rendered from the declarative list in
+   training-prefs-service so the explanation of each convention lives next to
+   the convention rather than in the markup.
+
+   Booleans use a two-option segmented control rather than a switch: the app has
+   no switch component, and inventing one here would look like a different app.
+   ====================================================================== */
+
+function trainingSection() {
+  const prefs = trainingPrefs.getPrefs();
+  const groups = [];
+
+  for (const preference of trainingPrefs.PREFERENCES) {
+    const last = groups[groups.length - 1];
+    if (!last || last.name !== preference.group) {
+      groups.push({ name: preference.group, items: [preference] });
+    } else {
+      last.items.push(preference);
+    }
+  }
+
+  return el('section', {}, [
+    sectionHead('Training preferences'),
+    el('p.t-caption.t-faint', {
+      text: 'These describe how you train, not how the app would prefer you to. '
+        + 'They are read when displaying and interpreting your log — changing one never rewrites a stored number.',
+      style: { marginBottom: 'var(--s-3)', padding: '0 var(--s-1)' },
+    }),
+    ...groups.map((group) => el('div', { style: { marginBottom: 'var(--s-4)' } }, [
+      el('div.t-overline', { text: group.name, style: { marginBottom: 'var(--s-2)' } }),
+      el('div.card.stack', { style: { gap: 'var(--s-4)' } },
+        group.items.map((preference) => preferenceField(preference, prefs))),
+    ])),
+    el('div.list', {}, [
+      actionRow(
+        'info',
+        'Restore training defaults',
+        'Back to the documented conventions',
+        handleResetPrefs
+      ),
+    ]),
+  ]);
+}
+
+function preferenceField(preference, prefs) {
+  const value = prefs[preference.key];
+
+  const control = (() => {
+    if (preference.type === 'readonly') {
+      return el('span.pill', { text: preference.display ?? String(value) });
+    }
+
+    if (preference.type === 'number') {
+      const input = el('input.input.input--num', {
+        type: 'number',
+        inputmode: 'numeric',
+        step: '1',
+        min: String(preference.min ?? 0),
+        max: String(preference.max ?? 99),
+        value: String(value ?? ''),
+        'aria-label': preference.label,
+        style: { width: '84px' },
+      });
+      input.addEventListener('blur', async () => {
+        const next = Math.min(
+          preference.max ?? 99,
+          Math.max(preference.min ?? 0, Number(input.value) || (preference.min ?? 1))
+        );
+        input.value = String(next);
+        await trainingPrefs.set(preference.key, next);
+        toast('Saved', 'success');
+      });
+      return input;
+    }
+
+    const options = preference.type === 'toggle'
+      ? [{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]
+      : preference.options;
+
+    const current = preference.type === 'toggle'
+      ? (value ? 'on' : 'off')
+      : String(value);
+
+    return segmented({
+      name: preference.label,
+      options,
+      value: current,
+      onChange: async (next) => {
+        const stored = preference.type === 'toggle' ? next === 'on' : next;
+        await trainingPrefs.set(preference.key, stored);
+
+        // Two preferences are load-bearing enough to warn about rather than
+        // silently accept: switching either one changes what the progression
+        // engine is allowed to conclude.
+        if (preference.warnOn && stored === true) {
+          toast(`${preference.label} is on — this changes how progression is calculated`, 'warning');
+        } else {
+          toast('Saved', 'success');
+        }
+        refresh();
+      },
+    });
+  })();
+
+  return el('div.field', {}, [
+    el('span.field__label', { text: preference.label }),
+    control,
+    el('span.t-caption.t-faint', { text: preference.help ?? '' }),
+  ]);
+}
+
+async function handleResetPrefs() {
+  const confirmed = window.confirm(
+    'Restore the documented training conventions?\n\n'
+    + 'This resets the preferences only. No logged workout, weigh-in or note is touched.'
+  );
+  if (!confirmed) return;
+  await trainingPrefs.reset();
+  toast('Training preferences restored', 'success');
+  refresh();
 }
 
 /* --- Install ------------------------------------------------------------ */
@@ -273,10 +399,39 @@ function dataSection() {
     on: { change: (event) => handleRestore(event.target) },
   });
 
+  const lastBackupAt = db.getLastBackupAt();
+
+  // The parachute written before the v1 -> v2 upgrade. Offered as a download for
+  // as long as it exists, and never deleted automatically.
+  const snapshotRow = el('div');
+  db.getPreMigrationSnapshot().then((snapshot) => {
+    if (!snapshot) return;
+    replace(snapshotRow, [
+      actionRow(
+        'download',
+        'Download pre-upgrade snapshot',
+        `Your data exactly as it was before the ${snapshot.schemaVersion} → ${db.SCHEMA_VERSION} upgrade`
+          + `${snapshot.capturedAt ? ` · ${formatDate(snapshot.capturedAt.slice(0, 10), { withYear: true })}` : ''}`,
+        () => handleSnapshotDownload(snapshot)
+      ),
+    ]);
+  });
+
   return el('section', {}, [
-    sectionHead('Data'),
+    sectionHead('Data', {
+      hint: lastBackupAt
+        ? `Last backup ${relativeDay(lastBackupAt.slice(0, 10))}`
+        : 'Never backed up',
+    }),
     el('div.list', {}, [
-      actionRow('download', 'Back up to JSON', 'Download everything IronLog has stored', handleBackup),
+      actionRow(
+        'download',
+        'Back up to JSON',
+        lastBackupAt
+          ? `Everything IronLog has stored · last ${formatDate(lastBackupAt.slice(0, 10), { withYear: true })}`
+          : 'Download everything IronLog has stored',
+        handleBackup
+      ),
       actionRow('upload', 'Restore from JSON', 'Replaces all current data', () => fileInput.click()),
       el('div.list__row', {}, [
         el('div.list__icon', {}, [icon('info')]),
@@ -292,6 +447,17 @@ function dataSection() {
       ]),
     ]),
     fileInput,
+    snapshotRow,
+
+    !lastBackupAt && db.read(db.COLLECTIONS.SESSIONS).length
+      ? el('div.note', { style: { marginTop: 'var(--s-3)' } }, [
+          el('span.t-footnote.t-semibold', { text: 'No backup taken yet' }),
+          el('span.note__meta', {
+            text: `${db.read(db.COLLECTIONS.SESSIONS).length} logged sessions live only on this device. `
+              + 'Back up now and keep the file somewhere else.',
+          }),
+        ])
+      : null,
 
     el('div.list', { style: { marginTop: 'var(--s-4)' } }, [
       el('button.list__row.list__row--tappable', {
@@ -323,18 +489,54 @@ function actionRow(iconName, title, sub, onClick) {
   ]);
 }
 
-/** Download the whole database as a timestamped JSON file. */
-function handleBackup() {
+/**
+ * Download the whole database as a timestamped JSON file.
+ *
+ * "Last backup" is stamped only after the download call returns without
+ * throwing. Recording it optimistically would put a reassuring date next to a
+ * backup that never reached the disk, in the one place the user has to be able
+ * to trust.
+ */
+async function handleBackup() {
   try {
     download(
       JSON.stringify(db.exportAll(), null, 2),
       stampedName('backup', 'json'),
       'application/json'
     );
+    await db.markBackupTaken();
     toast('Backup downloaded', 'success');
+    refresh();
   } catch (error) {
     console.error('[settings] backup failed:', error);
     toast('Backup failed', 'danger');
+  }
+}
+
+/** Download the pre-upgrade parachute exactly as it was captured. */
+function handleSnapshotDownload(snapshot) {
+  try {
+    download(
+      JSON.stringify(
+        // Shaped like a normal backup so it can be restored through the same
+        // Restore row without any special handling.
+        {
+          app: 'Project IronLog',
+          schemaVersion: snapshot.schemaVersion,
+          exportedAt: snapshot.capturedAt,
+          note: 'Pre-upgrade snapshot, captured automatically before the schema migration.',
+          data: snapshot.data,
+        },
+        null,
+        2
+      ),
+      stampedName(`pre-upgrade-v${snapshot.schemaVersion}`, 'json'),
+      'application/json'
+    );
+    toast('Snapshot downloaded', 'success');
+  } catch (error) {
+    console.error('[settings] snapshot download failed:', error);
+    toast('Could not download the snapshot', 'danger');
   }
 }
 
@@ -389,6 +591,7 @@ function aboutSection() {
       infoRow('Program', program.name),
       infoRow('Training days', String(programService.getTrainingDays().length)),
       infoRow('Storage', 'Local Storage on this device'),
+      infoRow('Data schema', `v${db.SCHEMA_VERSION}`),
     ]),
     el('p.t-caption.t-faint', {
       text: 'IronLog runs entirely in your browser. No account, no server, no tracking.',

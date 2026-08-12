@@ -67,11 +67,20 @@
     /* --- Program loaded ------------------------------------------------ */
     section('program');
     check('training days', programService.getTrainingDays().length, 5);
-    check('total exercises', programService.getAllExercises().length, 37);
+    check('total exercises', programService.getAllExercises().length, 38);
     ok('Saturday has Cable Lateral Raise at position 5',
       programService.getDayById('saturday-upper').exercises[4].id === 'cable-lateral-raise');
+    // Tuesday now opens with the optional push-up warm-up, so the working
+    // exercises start one slot later.
+    ok('Tuesday opens with the push-up warm-up',
+      programService.getDayById('tuesday-chest').exercises[0].id === 'push-ups-warmup');
     ok('Tuesday has Low-to-High Cable Fly at position 4',
-      programService.getDayById('tuesday-chest').exercises[3].id === 'low-to-high-cable-fly');
+      programService.getWorkingExercises(programService.getDayById('tuesday-chest'))[3].id
+        === 'low-to-high-cable-fly');
+    check('warm-up movements are excluded from the prescribed set count',
+      programService.countSets(programService.getDayById('tuesday-chest')),
+      programService.getWorkingExercises(programService.getDayById('tuesday-chest'))
+        .reduce((sum, ex) => sum + ex.sets, 0));
 
     /* --- First session: engine has no history -------------------------- */
     section('session 1 — first ever');
@@ -85,8 +94,14 @@
 
     const s1 = await sessionService.startSession('tuesday-chest', '2026-06-02');
     ok('session is in-progress', s1.status === 'in-progress');
-    check('entries match the day', s1.entries.length, 9);
-    check('incline slots = prescribed sets', s1.entries[0].sets.length, 4);
+    check('entries match the day', s1.entries.length, 10);
+    // Addressed by id, not by index: the warm-up movement sits at index 0 and
+    // holds no working sets.
+    const inclineEntry = (id) => sessionService.getSessionById(id).entries
+      .find((e) => e.exerciseId === 'incline-dumbbell-press');
+    check('incline slots = prescribed sets', inclineEntry(s1.id).sets.length, 4);
+    check('warm-up movement has no working sets',
+      s1.entries.find((e) => e.exerciseId === 'push-ups-warmup').sets.length, 0);
 
     // 27.5 kg for 8/8/7/6 — the brief's worked example.
     await logAll(s1.id, 'incline-dumbbell-press', 27.5, [8, 8, 7, 6]);
@@ -106,8 +121,12 @@
     /* --- Second session: top of range everywhere ---------------------- */
     section('session 2 — earns the increase');
     const s2 = await sessionService.startSession('tuesday-chest', '2026-06-09');
-    check('pre-filled weight', s2.entries[0].sets[0].weightKg, 27.5);
-    check('pre-filled reps', s2.entries[0].sets.map((s) => s.reps), [8, 8, 8, 7]);
+    check('pre-filled weight', inclineEntry(s2.id).sets[0].weightKg, 27.5);
+    check('pre-filled reps', inclineEntry(s2.id).sets.map((s) => s.reps), [8, 8, 8, 7]);
+    check('ramp sets pre-filled from the working weight',
+      inclineEntry(s2.id).warmupSets.length, 3);
+    ok('every ramp set is lighter than the working weight',
+      inclineEntry(s2.id).warmupSets.every((w) => w.weightKg < 27.5));
 
     await logAll(s2.id, 'incline-dumbbell-press', 27.5, [8, 8, 8, 8]);
     await sessionService.completeSession(s2.id);
@@ -115,11 +134,16 @@
     const summary2 = sessionService.getSessionSummary(s2.id);
     check('one exercise advancing', summary2.advancing.length, 1);
     check('advancing lift', summary2.advancing[0].exerciseId, 'incline-dumbbell-press');
-    // 27.5 per hand, doubled for dumbbells: 27.5 * 32 * 2
-    check('volume', summary2.volumeKg, 27.5 * 32 * 2);
+    // 27.5 kg is the logged total of both dumbbells, so it counts once. An
+    // earlier build doubled it, which counted every dumbbell set twice.
+    check('working volume', summary2.volumeKg, 27.5 * 32);
+    check('no warm-up volume was logged', summary2.volume.warmupKg, 0);
 
     const plan3 = sessionService.getRecommendation(incline, '2026-06-16');
-    check('advances to 30', plan3.weightKg, 30);
+    // +2.5 kg per hand on a dumbbell pair is +5 kg of logged total: 27.5 -> 32.5,
+    // which is 16.25 per hand. Adding 2.5 to the total would ask for a 15 kg
+    // dumbbell in one hand and a 12.5 in the other.
+    check('advances by one dumbbell pair', plan3.weightKg, 32.5);
     check('action is advance', plan3.action, ACTIONS.ADVANCE);
     check('resets to bottom of range', plan3.perSetReps, [6, 6, 6, 6]);
 
@@ -134,14 +158,14 @@
 
     const planDeload = sessionService.getRecommendation(incline, '2026-06-30');
     check('deload action', planDeload.action, ACTIONS.DELOAD_WAVE);
-    check('deload cuts the load to ~65%', planDeload.weightKg, 17.5);
+    check('deload cuts the load to ~65%', planDeload.weightKg, 20);
     check('deload honours the reduced set count', planDeload.perSetReps, [6, 6]);
 
     // Week 6 comes off the deload and resumes from the real working weight,
     // not from the reduced deload load.
     const planAfterDeload = sessionService.getRecommendation(incline, '2026-07-07');
     check('week 6 is not a deload', programService.getTrainingWeek('2026-07-07').isDeload, false);
-    check('resumes from the working weight', planAfterDeload.weightKg, 30);
+    check('resumes from the working weight', planAfterDeload.weightKg, 32.5);
 
     /* --- Personal records --------------------------------------------- */
     section('personal records');
@@ -215,6 +239,121 @@
       notesService.getNotesFor({ dayId: 'tuesday-chest' }).length, 2);
     check('day-scoped note hidden elsewhere',
       notesService.getNotesFor({ dayId: 'thursday-legs' }).length, 1);
+
+    /* --- The set model -------------------------------------------------
+       Warm-up, working and intensity work kept apart, and the promise that
+       only working sets move a prescribed load. These are the assertions the
+       whole v2 change rests on.
+       ================================================================== */
+    section('set model — warm-up / working / intensity');
+    const setModel = await import('../js/engine/set-model.js');
+
+    const s5 = await sessionService.startSession('tuesday-chest', '2026-07-14');
+    const triId = 'rope-triceps-pushdown';
+
+    // Three working sets at the top of the 10-12 range.
+    await logAll(s5.id, triId, 50, [12, 12, 12]);
+
+    // A ramp below it, and a drop set above it.
+    await sessionService.addWarmupSet(s5.id, triId);
+    await sessionService.updateWarmupSet(s5.id, triId, 0, { weightKg: 20, reps: 12, completed: true });
+    await sessionService.addDropSet(s5.id, triId, { stages: 3 });
+
+    let triEntry = () => sessionService.getSessionById(s5.id).entries
+      .find((e) => e.exerciseId === triId);
+    const dropId = triEntry().intensitySets[0].id;
+    await sessionService.updateIntensityStage(s5.id, triId, dropId, 0,
+      { weightKg: 70, reps: 3, completed: true, toFailure: true });
+    await sessionService.updateIntensityStage(s5.id, triId, dropId, 1,
+      { weightKg: 50, reps: 4, completed: true });
+    await sessionService.updateIntensityStage(s5.id, triId, dropId, 2,
+      { weightKg: 30, reps: 5, completed: true });
+
+    check('working sets untouched by the extras',
+      triEntry().sets.map((x) => x.weightKg), [50, 50, 50]);
+    check('warm-up set stored apart', triEntry().warmupSets.length, 1);
+    check('one drop sequence, three stages', triEntry().intensitySets[0].stages.length, 3);
+    check('reported as a sequence, not as extra sets',
+      setModel.describeComposition(triEntry()),
+      '3 working sets + 1 warm-up set + 1 drop-set sequence');
+
+    const s5live = sessionService.getSessionById(s5.id);
+    const vol5 = sessionService.getSessionVolumeBreakdown(s5live);
+    check('working volume', vol5.workingKg, 50 * 36);
+    check('warm-up volume kept separate', vol5.warmupKg, 20 * 12);
+    check('intensity volume kept separate', vol5.intensityKg, 70 * 3 + 50 * 4 + 30 * 5);
+
+    const completion5 = sessionService.getSessionCompletion(s5live);
+    ok('completion counts working sets only',
+      completion5.total === programService.countSets(programService.getDayById('tuesday-chest')),
+      `(got ${completion5.total})`);
+
+    await sessionService.completeSession(s5.id);
+
+    // The load must advance from the 50 kg working sets, not the 70 kg drop stage.
+    const tri = programService.getExercise(triId);
+    const planTri = sessionService.getRecommendation(tri, '2026-07-21');
+    check('progression reads the working weight', planTri.previous.weightKg, 50);
+    check('advance is measured from 50, not 70', planTri.weightKg, 51);
+    check('and it is an advance', planTri.action, ACTIONS.ADVANCE);
+
+    /* --- Pain-aware logging -------------------------------------------- */
+    section('pain-aware pull-ups');
+    const s6 = await sessionService.startSession('wednesday-back-biceps', '2026-07-15');
+    // Two pain-free reps of a prescribed four sets, then stop.
+    await sessionService.updateSet(s6.id, 'pull-ups', 0, { weightKg: null, reps: 6, completed: true });
+    await sessionService.updateSet(s6.id, 'pull-ups', 1, { weightKg: null, reps: 6, completed: true });
+    await sessionService.setPain(s6.id, 'pull-ups', {
+      score: 4, location: 'right elbow', action: 'stopped',
+    });
+    await sessionService.completeSession(s6.id);
+
+    const s6live = sessionService.getSessionById(s6.id);
+    check('pain logged', sessionService.getPainLogs(s6live).length, 1);
+    check('pain score kept', sessionService.getPainLogs(s6live)[0].score, 4);
+    ok('an incomplete session is allowed to finish', s6live.status === 'completed');
+
+    const summary6 = sessionService.getSessionSummary(s6.id);
+    ok('pain-limited reported on its own, not as a stall',
+      summary6.painLimited.some((x) => x.exerciseId === 'pull-ups'),
+      `(held: ${summary6.held.map((h) => h.exerciseId).join(',')})`);
+
+    const pullHistory = sessionService.getExerciseHistory('pull-ups', 3);
+    ok('history flags the session pain-limited', pullHistory[0].painLimited === true);
+    ok('history flags it incomplete', pullHistory[0].incomplete === true);
+
+    const planPull2 = sessionService.getRecommendation(pullUps, '2026-07-22');
+    ok('a pain-limited session does not cut the load',
+      planPull2.action !== ACTIONS.DELOAD_STALL, `(got ${planPull2.action})`);
+    check('and does not count as a stall', planPull2.stalledSessions, 0);
+
+    /* --- Ab wheel: difficulty before load ------------------------------ */
+    section('ab wheel — difficulty progression');
+    const abWheel = programService.getExercise('ab-wheel-rollout');
+    const s7 = await sessionService.startSession('sunday-posterior-chain', '2026-07-19');
+    await logAll(s7.id, 'ab-wheel-rollout', 0, [12, 12, 12]);   // top of 10-12
+    await sessionService.completeSession(s7.id);
+
+    const planAb = sessionService.getRecommendation(abWheel, '2026-07-26');
+    check('earns a harder variation', planAb.action, ACTIONS.DIFFICULTY);
+    check('moves up the ladder', planAb.difficulty, 'slow-eccentric');
+    ok('does not ask for external load', !planAb.weightKg, `(got ${planAb.weightKg})`);
+    ok('and does not say "add kg"', !/add\s+[\d.]+\s*kg/i.test(planAb.reason), planAb.reason);
+
+    /* --- Load display conventions -------------------------------------- */
+    section('load conventions');
+    const { describeLoad } = await import('../js/engine/loading.js');
+    const { formatLoad } = await import('../js/core/format.js');
+    check('dumbbell total shown per hand',
+      formatLoad(describeLoad(incline, 55), 'kg'), '27.5 kg / hand');
+    check('barbell shown as plates',
+      formatLoad(describeLoad(programService.getExercise('back-squat'), 40), 'kg'),
+      '+40 kg plates');
+    check('machine value shown raw',
+      formatLoad(describeLoad(programService.getExercise('leg-press'), 200), 'kg'),
+      '200 kg');
+    check('bodyweight shown as bodyweight',
+      formatLoad(describeLoad(pullUps, null), 'kg'), 'Bodyweight');
 
     /* --- Backup round trip -------------------------------------------- */
     section('backup');

@@ -4,6 +4,191 @@ All notable changes to Project IronLog. Follows [Semantic Versioning](https://se
 
 ---
 
+## [1.7.0] — 2026-08-12 — Warm-up, working and intensity sets
+
+Session 6. The app now distinguishes the three kinds of work in a session, and
+knows how the person using it actually writes down a load. Nothing was rebuilt:
+every existing session, weigh-in, photo, note and record is preserved, and the
+migration that made room for this is asserted against the real exported backup.
+
+### Added
+
+**A set model with three parts** (`js/engine/set-model.js`, pure and tested)
+
+- `entry.sets` now means **working sets and nothing else**. Ramp-up work lives in
+  `warmupSets`; drop sets and failure sets live in `intensitySets` as sequences
+  with stages.
+- Separate arrays rather than a `kind` tag on one list, deliberately. Seven
+  modules read `entry.sets`; a tag would need a filter in each, and one forgotten
+  filter would feed warm-ups to the double-progression engine — the exact failure
+  this change exists to prevent. With separate arrays the default reading is the
+  correct one, and the extras have to be asked for by name.
+- A drop-set sequence is reported as **one** piece of supplementary work:
+  "3 working sets + 1 drop-set sequence", never as six sets.
+- Warm-up sets can be added to **any** exercise. Where the program prescribes a
+  ramp (Squat, RDL, both incline presses, flat dumbbell bench, machine chest
+  press) the rungs are pre-filled at 40/60/80% of the working weight, rounded to
+  something loadable, with a **Suggest ramp** action to rebuild them.
+
+**Load conventions** (`js/engine/loading.js`, pure and tested)
+
+- One module now owns what a logged number *means*: plates for a barbell, the
+  total of both dumbbells for a dumbbell, the raw reading for a machine or cable,
+  added load only for bodyweight.
+- Display follows the equipment: `+40 kg plates` with an estimated total where the
+  bar weight is known, `27.5 kg / hand` under a logged 55, `8 kg per side` for a
+  two-stack cable movement, `Bodyweight`. The set row shows the derived reading
+  live beneath the field as it is typed.
+- **Dumbbell increments are per hand.** "+2.5 kg" in the program means the next
+  pair up, so the engine steps the logged total by 5 kg. It previously suggested
+  52.5 kg — 26.25 per hand, a dumbbell that exists on no rack.
+
+**Optional intensity techniques**
+
+- **Add drop set** (multi-stage, seeded from the heaviest completed working set,
+  every rung editable, "reached failure" recorded on the first stage) and
+  **Add failure set**. Offered on isolation and accessory work by default,
+  withheld from the main compounds, and overridable per exercise via
+  `intensityTechniquesAllowed`.
+- Failure training is neither prohibited nor nagged about. It is recorded as its
+  own kind of work and kept out of the progression arithmetic. That is the whole
+  of the app's opinion.
+
+**Pain-aware logging**
+
+- Optional 0–10 score, location, note, what you did (completed / fewer reps /
+  stopped / skipped), and an optional substitution chosen from the program's own
+  alternatives. Nothing is substituted automatically.
+- A pain-limited session is excluded from stall detection and from the review's
+  strength comparison, so stopping a set because your elbow hurts never reads as
+  a strength regression. The session itself is untouched and still appears in
+  history, reports and the CSV.
+- Non-diagnostic by design: it states that it is not a diagnosis and points at a
+  professional assessment rather than offering an opinion.
+
+**Difficulty progression for the ab wheel**
+
+- `progression.mode: 'difficulty-first'` with a five-rung ladder: standard → slow
+  eccentric → longer range → advanced variation → weighted. Hitting 12 reps now
+  earns the next rung, not a plate; external resistance is the last rung, and the
+  wording says so.
+
+**Push-ups before chest**
+
+- An optional pre-workout warm-up on Tuesday: 1–2 sets, 8–15 reps, not to
+  failure. Modelled as a real exercise with `role: 'pre-workout-warmup'` and no
+  working sets, so it contributes zero to progression, volume, completion and the
+  prescribed set count *by construction* rather than by special-casing.
+- Logged as reps only — no weight field.
+
+**Morning weigh-in reminder, and somewhere to answer it**
+
+- A dismissible banner on Home: "Good morning. Log today's weight?" with
+  **Enter Weight** and **Skip**. Only on a training day, only when today's weight
+  is missing, at most once per calendar day, and never over the Start Workout
+  button.
+- **`body-service` had been able to store weigh-ins and full scale readings since
+  Session 1, but nothing in the app ever called it.** There was no screen to type
+  a number into, so the body-weight series could only be filled by restoring a
+  backup — which is why the real database had zero weigh-ins. Session 6 adds the
+  two-tap weight sheet and a **Body** tab in Logs for all ten scale metrics.
+
+**Training Preferences** (Settings → Training preferences)
+
+- Fourteen conventions — load display, increment basis, warm-up separation,
+  intensity techniques, push-ups, pull-up handling, ab-wheel progression — stored
+  in a new `trainingPrefs` collection and read on the display side. Changing one
+  never rewrites a stored number.
+
+**Backup safety**
+
+- **Last backup** date in Settings, stamped only after the download call returns
+  without throwing, and a warning when logged sessions have never been backed up.
+- **Download pre-upgrade snapshot**: the verbatim v1 copy taken before the
+  migration, shaped like a normal backup so it restores through the same Restore
+  row. Never overwritten, never auto-deleted.
+
+**Reports**
+
+- Warm-up, working and intensity volume are reported as **three figures and never
+  as one**. A fortnight where working volume fell while drop-set volume rose is
+  not the same fortnight as one where the total held steady, and a single number
+  cannot tell them apart.
+- New review findings: set composition, intensity techniques, discomfort notes.
+  New PDF sections for the same. The strength finding now names any lift excluded
+  as pain-limited, so a verdict computed over four of six lifts does not read as
+  though it covered all six.
+- `sets.csv` gains `set_kind`, `drop_sequence`, `drop_stage`, `to_failure`,
+  `load_entry`, `weight_display`, pain columns and `difficulty`, so a spreadsheet
+  can filter to working sets and reproduce exactly what the engine saw.
+  `sessions.csv` splits its counts and volume by set type. A new
+  **Discomfort log** dataset exports every pain note.
+
+### Changed
+
+- **Dumbbell volume is no longer doubled.** The previous build multiplied
+  per-hand-tagged loads by two, on the assumption that the logged figure was per
+  hand. Under the convention actually used — the total of both dumbbells — that
+  counted every dumbbell set twice. Historical *stored* data is untouched;
+  derived volume figures for dumbbell lifts drop by about half, and some volume
+  PRs recompute.
+- **Low-to-High Cable Fly** is a raw machine value, labelled *per side*, rather
+  than a per-hand load. Its historical volume contribution halves for the same
+  reason.
+- **Incline Smith Machine Press** is treated as plates, not as a machine stack.
+  Its bar weight varies by machine and is often counterbalanced, so none is
+  claimed.
+- Session completion, week completion and the prescribed set count all count
+  **working sets only**. Ticking three ramp sets no longer reads as 30% of the
+  session done, and adding a drop set no longer pushes a finished session below
+  100%.
+- The narrow-phone set-row grid gained a column for the optional failure flag.
+  Without it the commit button was pushed off a drop-set row.
+- `js/engine/progression.js` now imports one pure sibling (`loading.js`). It
+  remains free of storage, globals and the clock.
+
+### Fixed
+
+- A session containing only a pre-workout warm-up could never satisfy "all sets
+  logged", because the finish check required every entry to have at least one
+  ticked set. Entries with no working sets are now skipped.
+- The completion summary filed a pain-limited exercise under "held", which reads
+  as a stall. It now has its own bucket.
+
+### Migration — schema v1 to v2
+
+Strictly additive, and asserted against the real exported backup
+(`tools/test-migration.mjs`, 16 assertions).
+
+- The whole v1 database is copied verbatim to a reserved `__premigration` key
+  **before anything is touched**, and stays downloadable from Settings.
+- Each entry gains `setModel: 'legacy'`, empty `warmupSets` / `intensitySets` and
+  `pain: null`; each set gains `kind: 'legacy'`. No weight, rep count, completion
+  flag, RPE, date, note or ordering is altered.
+- Idempotent. A second pass, or importing an already-migrated backup, is a no-op.
+  A v1 backup still restores and is migrated on the way in.
+- A database holding sessions but no `meta` record is treated as v1 rather than
+  assumed current, which would have skipped the migration entirely.
+- **Nothing is reclassified by guesswork.** Week one is, on almost every exercise,
+  a rising-weight falling-rep ladder — 150×12, 180×10, 200×8, 220×6 on the squat.
+  That looks like a ramp; it also looks exactly like a pyramid, or like working up
+  to a top single, and the app cannot tell which. Legacy sets keep feeding
+  progression, because they are the only record of what was lifted, and they are
+  labelled "unclassified" wherever they appear. History → session detail offers
+  **Classify these sets** for when you want to say what they were.
+
+### Tests
+
+- `tools/test-sets.mjs` — 31 new assertions: load conventions, the set model, and
+  the negative guarantees that a warm-up, a drop set and a failure set cannot
+  move a prescribed load, plus the progression table from the brief, verbatim.
+- `tools/test-migration.mjs` — 16 assertions, including a lossless round trip of
+  the real exported backup.
+- `tools/e2e.html` — 117 assertions, up from 84.
+- Engine suite — 121 assertions, up from 62.
+
+---
+
 ## [1.6.0] — 2026-08-05 — Exercise illustrations
 
 ### Added

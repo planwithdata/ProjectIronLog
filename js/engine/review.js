@@ -70,6 +70,9 @@ export function buildReview(input) {
   addAdherenceFinding(findings, input);
   addStrengthFinding(findings, input);
   addVolumeFinding(findings, input);
+  addSetTypeFinding(findings, input);
+  addIntensityFinding(findings, input);
+  addPainFinding(findings, input);
   addRecordsFinding(findings, input);
   addRecoveryFinding(findings, input);
 
@@ -208,6 +211,12 @@ function addStrengthFinding(findings, { strength }) {
     text += ` Stalled: ${strength.stalled.slice(0, 4).join(', ')}${strength.stalled.length > 4 ? '…' : ''}.`;
   }
 
+  // Say so when a lift was left out. A strength verdict computed over four of
+  // six lifts should not be read as though it covered all six.
+  if (strength.painExcluded?.length) {
+    text += ` Excluded as pain-limited: ${strength.painExcluded.slice(0, 3).join(', ')}.`;
+  }
+
   findings.push({
     key: 'strength',
     label: 'Strength',
@@ -224,10 +233,10 @@ function addVolumeFinding(findings, { volume }) {
   if (!volume.previousKg) {
     findings.push({
       key: 'volume',
-      label: 'Volume',
+      label: 'Working volume',
       tone: TONE.NEUTRAL,
       value: `${fmt(volume.currentKg, 0)} kg`,
-      text: 'First period with volume data — this becomes the baseline for the next review.',
+      text: 'First period with working-set volume data — this becomes the baseline for the next review.',
     });
     return;
   }
@@ -235,7 +244,9 @@ function addVolumeFinding(findings, { volume }) {
   const change = ((volume.currentKg - volume.previousKg) / volume.previousKg) * 100;
 
   let tone = TONE.GOOD;
-  let text = `Total load moved changed by ${signed(change, 0)}% against the previous period.`;
+  // "Working-set volume", not "total load moved": warm-up and intensity work are
+  // reported by the set-composition finding and are deliberately not in here.
+  let text = `Working-set volume changed by ${signed(change, 0)}% against the previous period.`;
 
   if (change <= THRESHOLDS.volumeDropConcerning) {
     tone = TONE.WATCH;
@@ -247,11 +258,117 @@ function addVolumeFinding(findings, { volume }) {
 
   findings.push({
     key: 'volume',
-    label: 'Volume',
+    label: 'Working volume',
     tone,
     value: `${signed(change, 0)}%`,
     detail: `${fmt(volume.previousKg, 0)} → ${fmt(volume.currentKg, 0)} kg`,
     text,
+  });
+}
+
+/**
+ * How the period's work divided between warm-up, working and intensity sets.
+ *
+ * Reported as three figures and never as one. A fortnight in which working
+ * volume fell while drop-set volume rose is a materially different fortnight
+ * from one where the total happened to hold steady, and a single "volume"
+ * number cannot tell them apart — which is exactly how someone concludes their
+ * training is fine while the sets that drive progression are quietly shrinking.
+ *
+ * Tone is NEUTRAL by design: none of these splits is good or bad in itself.
+ */
+function addSetTypeFinding(findings, { setTypes }) {
+  if (!setTypes || !setTypes.workingSets) return;
+
+  const parts = [
+    `${setTypes.workingSets} programmed working set${setTypes.workingSets === 1 ? '' : 's'}`,
+  ];
+  if (setTypes.warmupSets) parts.push(`${setTypes.warmupSets} warm-up/ramp`);
+  if (setTypes.dropSequences) {
+    parts.push(`${setTypes.dropSequences} drop-set sequence${setTypes.dropSequences === 1 ? '' : 's'}`);
+  }
+  if (setTypes.failureSets) {
+    parts.push(`${setTypes.failureSets} failure set${setTypes.failureSets === 1 ? '' : 's'}`);
+  }
+
+  let text = `${parts.join(', ')}. Only the working sets drove progression.`;
+  if (setTypes.unclassifiedSets) {
+    text += ` ${setTypes.unclassifiedSets} set${setTypes.unclassifiedSets === 1 ? '' : 's'} `
+      + 'from before warm-up tracking remain unclassified and are counted as working sets.';
+  }
+
+  findings.push({
+    key: 'setTypes',
+    label: 'Set composition',
+    tone: TONE.NEUTRAL,
+    value: String(setTypes.workingSets),
+    detail: [
+      `working ${fmt(setTypes.workingVolumeKg, 0)} kg`,
+      setTypes.warmupVolumeKg ? `warm-up ${fmt(setTypes.warmupVolumeKg, 0)} kg` : null,
+      setTypes.intensityVolumeKg ? `intensity ${fmt(setTypes.intensityVolumeKg, 0)} kg` : null,
+    ].filter(Boolean).join(' · '),
+    text,
+  });
+}
+
+/**
+ * Intensity techniques used, and a reminder of what they are not.
+ *
+ * Deliberately never judgemental about the *amount*. The brief is explicit that
+ * failure work is the user's choice and must be preserved as a preference
+ * rather than treated as a problem to be corrected.
+ */
+function addIntensityFinding(findings, { setTypes }) {
+  if (!setTypes) return;
+  const used = (setTypes.dropSequences ?? 0) + (setTypes.failureSets ?? 0);
+  if (!used) return;
+
+  findings.push({
+    key: 'intensity',
+    label: 'Intensity techniques',
+    tone: TONE.NEUTRAL,
+    value: String(used),
+    detail: [
+      setTypes.dropSequences ? `${setTypes.dropSequences} drop` : null,
+      setTypes.failureSets ? `${setTypes.failureSets} failure` : null,
+      setTypes.intensityExercises?.length
+        ? `on ${setTypes.intensityExercises.slice(0, 3).join(', ')}`
+        : null,
+    ].filter(Boolean).join(' · '),
+    text: 'Supplementary work by choice. It is excluded from progression and from '
+      + 'working-set volume, so it neither earned nor cost you a load increase.',
+  });
+}
+
+/**
+ * Discomfort logged during the period.
+ *
+ * Informational and non-diagnostic: it reports what was recorded, notes that
+ * those sessions were held out of the strength judgement, and points at a
+ * professional rather than offering an opinion.
+ */
+function addPainFinding(findings, { pain }) {
+  if (!pain || !pain.count) return;
+
+  const worst = pain.maxScore ?? 0;
+  const locations = (pain.locations ?? []).slice(0, 3).join(', ');
+
+  findings.push({
+    key: 'pain',
+    label: 'Discomfort logged',
+    // WATCH rather than BAD: a logged pain note is the user doing the right
+    // thing, not a failure in the program.
+    tone: worst >= 5 ? TONE.WATCH : TONE.NEUTRAL,
+    value: `${pain.count}×`,
+    detail: [
+      locations || null,
+      `peak ${worst}/10`,
+      pain.stoppedCount ? `${pain.stoppedCount} stopped early` : null,
+    ].filter(Boolean).join(' · '),
+    text: `Logged on ${pain.exercises.slice(0, 3).join(', ')}${pain.exercises.length > 3 ? '…' : ''}. `
+      + 'Those sessions were excluded from the strength comparison rather than counted as a '
+      + 'regression. Do not force painful repetitions, and seek professional assessment if the '
+      + 'problem persists.',
   });
 }
 

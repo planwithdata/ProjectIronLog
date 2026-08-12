@@ -15,15 +15,21 @@ import { go, refresh } from '../core/router.js';
 import { toast } from '../core/events.js';
 import {
   formatDate, relativeDay, formatDuration, trimNumber,
-  displayWeight, pluralize,
+  displayWeight, pluralize, formatLoad,
 } from '../core/format.js';
 import * as sessionService from '../services/session-service.js';
 import * as programService from '../services/program-service.js';
 import * as settingsService from '../services/settings-service.js';
+import * as trainingPrefs from '../services/training-prefs-service.js';
 import * as prService from '../services/pr-service.js';
-import { repRange } from '../engine/progression.js';
+import { repRange, difficultyRung } from '../engine/progression.js';
+import { describeLoad } from '../engine/loading.js';
+import {
+  normalizeEntry, workingSets, warmupSets, intensitySequences,
+  isLegacyEntry, describeComposition, PAIN_ACTION_LABELS,
+} from '../engine/set-model.js';
 import { sectionHead, emptyState, stat } from '../../components/stat.js';
-import { confirmSheet } from '../../components/sheet.js';
+import { confirmSheet, openSheet } from '../../components/sheet.js';
 
 export function render(params = {}) {
   const sessionId = params.id ?? params[0] ?? null;
@@ -175,13 +181,28 @@ function detailView(sessionId) {
 
     el('div.grid.grid--auto', {}, [
       stat({
-        label: 'Sets',
+        label: 'Working sets',
         value: `${summary.completion.done}/${summary.completion.total}`,
+        foot: [
+          summary.warmupSetCount ? `${summary.warmupSetCount} warm-up` : null,
+          summary.dropSequences ? pluralize(summary.dropSequences, 'drop set') : null,
+          summary.failureSets ? pluralize(summary.failureSets, 'failure set') : null,
+        ].filter(Boolean).join(' · ') || undefined,
       }),
       stat({
-        label: 'Volume',
-        value: trimNumber(displayWeight(summary.volumeKg, units), 0),
+        label: 'Working volume',
+        value: trimNumber(displayWeight(summary.volume.workingKg, units), 0),
         unit: units,
+        foot: summary.volume.warmupKg || summary.volume.intensityKg
+          ? [
+              summary.volume.warmupKg
+                ? `+${trimNumber(displayWeight(summary.volume.warmupKg, units), 0)} warm-up`
+                : null,
+              summary.volume.intensityKg
+                ? `+${trimNumber(displayWeight(summary.volume.intensityKg, units), 0)} intensity`
+                : null,
+            ].filter(Boolean).join(' · ')
+          : undefined,
       }),
       stat({
         label: 'Duration',
@@ -215,7 +236,7 @@ function detailView(sessionId) {
 
     el('section', {}, [
       sectionHead('Logged sets'),
-      el('div.stack', {}, session.entries.map((entry) => entryCard(entry, units))),
+      el('div.stack', {}, session.entries.map((entry) => entryCard(entry, units, sessionId))),
     ]),
 
     el('section', {}, [
@@ -234,45 +255,188 @@ function detailView(sessionId) {
   ]);
 }
 
-/** One exercise's logged sets, as chips. */
-function entryCard(entry, units) {
+/**
+ * One exercise's logged work, grouped by kind.
+ *
+ * Warm-up, working and intensity sets are shown in separate rows with their own
+ * labels. A flat chip list would make a three-rung drop set look like three more
+ * working sets, which is the reading the whole set model exists to prevent.
+ */
+function entryCard(entry, units, sessionId) {
   const exercise = programService.getExercise(entry.exerciseId);
-  const done = entry.sets.filter((set) => set.completed);
+  const live = normalizeEntry(entry);
+  const working = workingSets(live).filter((set) => set.completed);
+  const warmups = warmupSets(live).filter((set) => set.completed);
+  const sequences = intensitySequences(live);
+  const legacy = isLegacyEntry(live);
   const range = exercise ? repRange(exercise) : { max: Infinity };
+  const loadPrefs = trainingPrefs.getLoadPrefs();
+
+  const chip = (set, { top = false } = {}) => {
+    const descriptor = exercise ? describeLoad(exercise, set.weightKg, loadPrefs) : null;
+    return el(`span.set-chip${top ? '.set-chip--top' : ''}`, {}, [
+      el('span.set-chip__weight', {
+        text: set.weightKg
+          ? trimNumber(displayWeight(descriptor?.displayKg ?? set.weightKg, units), 2)
+          : 'BW',
+      }),
+      el('span.set-chip__reps', { text: `× ${set.reps ?? 0}` }),
+      set.rpe ? el('span.set-chip__reps', { text: ` @${set.rpe}` }) : null,
+      set.toFailure ? el('span.set-chip__reps', { text: ' → failure' }) : null,
+    ]);
+  };
+
+  // How the numbers in the chips should be read. Spelled out as a sentence
+  // rather than pasted in raw: "Loads shown / hand." is not English.
+  const readingNote = (() => {
+    if (!exercise || !working.length) return null;
+    switch (describeLoad(exercise, working[0]?.weightKg ?? null, loadPrefs).qualifier) {
+      case '/ hand':   return 'Loads shown per hand.';
+      case 'plates':   return 'Loads shown as plates; the bar is not included.';
+      case 'per side': return 'Loads shown as the machine value, per side.';
+      case 'total':    return 'Loads shown as the total of both dumbbells.';
+      default:         return null;
+    }
+  })();
 
   return el('article.card', {}, [
     el('div.row.row--between', { style: { alignItems: 'flex-start' } }, [
       el('div', { style: { minWidth: 0 } }, [
         el('div.t-callout.t-semibold', { text: exercise?.name ?? entry.exerciseId }),
         el('div.t-caption.t-faint', {
-          text: done.length
-            ? `${pluralize(done.length, 'set')} logged`
-            : 'Skipped',
+          text: describeComposition(live) || 'Skipped',
         }),
       ]),
-      entry.targetWeightKg !== null && entry.targetWeightKg !== undefined
-        ? el('span.pill', {
-            text: `target ${trimNumber(displayWeight(entry.targetWeightKg, units), 2)} ${units}`,
-          })
-        : null,
+      el('div.row', { style: { gap: 'var(--s-1)', flexWrap: 'wrap', justifyContent: 'flex-end' } }, [
+        legacy ? el('span.pill', { text: 'unclassified' }) : null,
+        entry.targetWeightKg !== null && entry.targetWeightKg !== undefined && exercise
+          ? el('span.pill', {
+              text: `target ${formatLoad(describeLoad(exercise, entry.targetWeightKg, loadPrefs), units)}`,
+            })
+          : null,
+      ]),
     ]),
 
-    done.length
-      ? el('div.session-detail__sets', {}, done.map((set) =>
-          el(`span.set-chip${(set.reps ?? 0) >= range.max ? '.set-chip--top' : ''}`, {}, [
-            el('span.set-chip__weight', {
-              text: set.weightKg
-                ? `${trimNumber(displayWeight(set.weightKg, units), 2)}`
-                : 'BW',
-            }),
-            el('span.set-chip__reps', { text: `× ${set.reps ?? 0}` }),
-            set.rpe ? el('span.set-chip__reps', { text: ` @${set.rpe}` }) : null,
-          ])
-        ))
+    warmups.length
+      ? el('div', { style: { marginTop: 'var(--s-2)' } }, [
+          el('div.t-micro.t-faint', { text: 'WARM-UP' }),
+          el('div.session-detail__sets', {}, warmups.map((set) => chip(set))),
+        ])
+      : null,
+
+    working.length
+      ? el('div', { style: { marginTop: 'var(--s-2)' } }, [
+          el('div.t-micro.t-faint', {
+            text: legacy ? 'LOGGED SETS' : 'WORKING SETS',
+          }),
+          el('div.session-detail__sets', {},
+            working.map((set) => chip(set, { top: (set.reps ?? 0) >= range.max }))),
+        ])
+      : null,
+
+    ...sequences.map((sequence) => el('div', { style: { marginTop: 'var(--s-2)' } }, [
+      el('div.t-micro.t-faint', {
+        text: sequence.type === 'drop' ? 'DROP SET' : 'FAILURE SET',
+      }),
+      el('div.session-detail__sets', {},
+        // Arrows between stages: a drop set is a sequence, and the order is the
+        // technique.
+        sequence.stages.flatMap((stage, index) => [
+          index ? el('span.t-caption.t-faint', { text: '↓' }) : null,
+          chip(stage),
+        ]).filter(Boolean)),
+      sequence.note
+        ? el('div.t-caption.t-faint', { text: sequence.note, style: { marginTop: '2px' } })
+        : null,
+    ])),
+
+    live.pain
+      ? el('div.pain-panel', { style: { marginTop: 'var(--s-3)' } }, [
+          el('div.t-footnote.t-semibold', { text: `Discomfort ${live.pain.score}/10` }),
+          el('div.t-caption.t-dim', {
+            text: [live.pain.location, PAIN_ACTION_LABELS[live.pain.action], live.pain.note]
+              .filter(Boolean).join(' · '),
+          }),
+        ])
+      : null,
+
+    live.difficulty
+      ? el('p.t-caption.t-dim', {
+          text: `Difficulty: ${difficultyRung(exercise, live.difficulty)?.label ?? live.difficulty}`,
+          style: { marginTop: 'var(--s-2)' },
+        })
+      : null,
+
+    readingNote
+      ? el('p.t-micro.t-faint', { text: readingNote, style: { marginTop: 'var(--s-2)' } })
+      : null,
+
+    // The honest fix for unclassified history: let the user say what those sets
+    // were, rather than have the app decide for them.
+    legacy && working.length
+      ? el('button.btn.btn--ghost.btn--sm', {
+          type: 'button',
+          style: { marginTop: 'var(--s-2)' },
+          on: { click: () => openReclassifySheet(sessionId, entry, exercise, units) },
+        }, [el('span', { text: 'Classify these sets' })])
       : null,
 
     entry.notes ? el('p.t-caption.t-dim', { text: entry.notes, style: { marginTop: 'var(--s-2)' } }) : null,
   ]);
+}
+
+/**
+ * Ask which of a legacy entry's sets were ramps.
+ *
+ * Every set defaults to Working — the reading the migration already uses — so
+ * confirming without changing anything is a no-op rather than a silent
+ * reinterpretation.
+ */
+async function openReclassifySheet(sessionId, entry, exercise, units) {
+  const sets = normalizeEntry(entry).sets;
+  const choices = sets.map(() => 'working');
+
+  const rows = sets.map((set, index) => {
+    const label = set.weightKg
+      ? `${trimNumber(displayWeight(set.weightKg, units), 2)} ${units} × ${set.reps ?? 0}`
+      : `Bodyweight × ${set.reps ?? 0}`;
+
+    const select = el('select.input', {
+      'aria-label': `Set ${index + 1} kind`,
+      on: { change: (event) => { choices[index] = event.target.value; } },
+    }, [
+      el('option', { value: 'working', text: 'Working set', selected: true }),
+      el('option', { value: 'warmup', text: 'Warm-up / ramp' },),
+      el('option', { value: 'drop', text: 'Drop-set stage' }),
+    ]);
+
+    return el('div.row.row--between', { style: { gap: 'var(--s-3)' } }, [
+      el('span.t-subhead.tnum', { text: `${index + 1}. ${label}` }),
+      el('div', { style: { flex: '0 0 auto', width: '150px' } }, [select]),
+    ]);
+  });
+
+  const choice = await openSheet({
+    title: 'Classify these sets',
+    text: `${exercise?.name ?? 'This exercise'} was logged before warm-up tracking existed, so `
+      + 'the app does not know which sets were ramps. Nothing changes unless you say so — the '
+      + 'weights and reps are untouched either way.',
+    body: el('div.stack', { style: { gap: 'var(--s-3)' } }, rows),
+    actions: [
+      { label: 'Save', value: true, tone: 'primary' },
+      { label: 'Cancel', value: false, tone: 'plain' },
+    ],
+  });
+
+  if (!choice) return;
+
+  try {
+    await sessionService.reclassifyLegacySets(sessionId, entry.exerciseId, choices);
+    toast('Sets classified', 'success');
+    refresh();
+  } catch (error) {
+    toast(error.message || 'Could not classify those sets', 'danger');
+  }
 }
 
 function actionRow(iconName, title, sub, onClick, danger = false) {

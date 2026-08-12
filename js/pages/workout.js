@@ -22,16 +22,26 @@ import { go, refresh } from '../core/router.js';
 import { toast } from '../core/events.js';
 import {
   today, isoWeekday, pluralize, trimNumber, displayWeight,
-  relativeDay, formatDuration,
+  relativeDay, formatDuration, formatLoad, formatLoadSecondary,
 } from '../core/format.js';
 import * as programService from '../services/program-service.js';
 import * as sessionService from '../services/session-service.js';
 import * as notesService from '../services/notes-service.js';
 import * as settingsService from '../services/settings-service.js';
+import * as trainingPrefs from '../services/training-prefs-service.js';
 import * as prService from '../services/pr-service.js';
 import * as restTimer from '../services/rest-timer.js';
-import { actionLabel, repRange, incrementFor, earnedAdvance } from '../engine/progression.js';
+import {
+  actionLabel, repRange, incrementFor, earnedAdvance,
+  difficultyLadder, difficultyRung,
+} from '../engine/progression.js';
+import { describeLoad } from '../engine/loading.js';
+import {
+  normalizeEntry, workingSets, warmupSets, intensitySequences,
+  isLegacyEntry, isPainLimited, describeComposition, PAIN_ACTION, PAIN_ACTION_LABELS,
+} from '../engine/set-model.js';
 import { setRow } from '../../components/set-row.js';
+import { intensityBlock, intensityActions } from '../../components/intensity-block.js';
 import { exerciseArt } from '../../components/exercise-art.js';
 import { mountRestBar } from '../../components/rest-bar.js';
 import { openSheet, confirmSheet, sheetRow } from '../../components/sheet.js';
@@ -64,7 +74,7 @@ export function render(params = {}) {
     dayHeader(day, wave, session),
     day.type === 'training'
       ? el('div.stack', {},
-          day.exercises.map((exercise) =>
+          visibleExercises(day, session).map((exercise) =>
             session
               ? loggingCard(exercise, session, wave)
               : browseCard(exercise, day, wave)))
@@ -72,6 +82,23 @@ export function render(params = {}) {
     session ? finishPanel(session) : startPanel(day, wave, active),
     day.type === 'training' && !session ? progressionPanel() : null,
   ]);
+}
+
+/**
+ * Which exercises to draw.
+ *
+ * An open session is the authority: it lists exactly what was prescribed when
+ * it started, so turning the push-up warm-up off mid-week does not make a row
+ * the user has already logged disappear. Browsing follows the current
+ * preference instead.
+ */
+function visibleExercises(day, session) {
+  if (session) {
+    const logged = new Set(session.entries.map((entry) => entry.exerciseId));
+    return day.exercises.filter((exercise) => logged.has(exercise.id));
+  }
+  return day.exercises.filter((exercise) =>
+    !programService.isWarmupOnly(exercise) || trainingPrefs.pushupWarmupEnabled());
 }
 
 /** Mount the rest bar only while a session is open. */
@@ -124,7 +151,11 @@ function daySwitcher(selected, dayKey, locked) {
         text: day.day.slice(0, 3).toUpperCase(),
         style: { opacity: isSelected ? '0.85' : '0.55' },
       }),
-      el('span.t-callout.t-semibold', { text: trainable ? String(day.exercises.length) : '—' }),
+      // Working exercises only, so Tuesday reads 9 here and 9 in the header
+      // rather than gaining a tenth from the optional warm-up movement.
+      el('span.t-callout.t-semibold', {
+        text: trainable ? String(programService.getWorkingExercises(day).length) : '—',
+      }),
     ]);
   }));
 }
@@ -132,8 +163,11 @@ function daySwitcher(selected, dayKey, locked) {
 /* --- Day header --------------------------------------------------------- */
 
 function dayHeader(day, wave, session) {
+  // Working exercises only: the optional warm-up movement is not one of the
+  // nine things you came to do, and it prescribes no sets to count.
+  const working = programService.getWorkingExercises(day);
   const setCount = wave.isDeload
-    ? day.exercises.reduce((sum, ex) => sum + programService.deloadSets(ex.sets), 0)
+    ? working.reduce((sum, ex) => sum + programService.deloadSets(ex.sets), 0)
     : programService.countSets(day);
 
   const pills = [];
@@ -144,7 +178,7 @@ function dayHeader(day, wave, session) {
         text: `${completion.done}/${completion.total} sets`,
       }));
     } else {
-      pills.push(el('span.pill', { text: pluralize(day.exercises.length, 'exercise') }));
+      pills.push(el('span.pill', { text: pluralize(working.length, 'exercise') }));
       pills.push(el('span.pill', { text: pluralize(setCount, 'set') }));
     }
     if (wave.isDeload) pills.push(el('span.pill.pill--warning', { text: 'Deload' }));
@@ -179,10 +213,33 @@ function dayHeader(day, wave, session) {
 
 /** The prescription plus what the engine will recommend when you start. */
 function browseCard(exercise, day, wave) {
+  const units = settingsService.getUnits();
+  const loadPrefs = trainingPrefs.getLoadPrefs();
+
+  // A pre-workout warm-up movement has no prescription to recommend, so it
+  // shows what it is rather than a target it does not have.
+  if (programService.isWarmupOnly(exercise)) {
+    return el('article.card', {}, [
+      exerciseHead(exercise),
+      exerciseArt(exercise),
+      el('div.ex-card__meta', {}, [
+        metaPill('Sets', `1-2 optional`),
+        metaPill('Reps', exercise.reps.label),
+      ]),
+      warmupOnlyBlurb(exercise),
+      cuesList(exercise),
+      exerciseNotes(exercise, day),
+    ]);
+  }
+
   const sets = wave.isDeload ? programService.deloadSets(exercise.sets) : exercise.sets;
   const plan = sessionService.getRecommendation(exercise);
-  const units = settingsService.getUnits();
   const last = sessionService.getLastPerformance(exercise.id);
+  const range = repRange(exercise);
+
+  const descriptor = plan.weightKg === null || plan.weightKg === undefined
+    ? null
+    : describeLoad(exercise, plan.weightKg, loadPrefs);
 
   return el('article.card', {}, [
     exerciseHead(exercise),
@@ -192,8 +249,9 @@ function browseCard(exercise, day, wave) {
       metaPill('Sets', String(sets)),
       metaPill('Reps', exercise.reps.label),
       metaPill('Rest', exercise.rest.label),
-      plan.weightKg !== null
-        ? metaPill('Target', `${trimNumber(displayWeight(plan.weightKg, units), 2)} ${units}`, 'accent')
+      descriptor ? metaPill('Target', formatLoad(descriptor, units), 'accent') : null,
+      programService.supportsRamp(exercise) && trainingPrefs.warmupEnabled()
+        ? metaPill('Ramp', `${programService.rampSetCount(exercise)} sets`)
         : null,
     ]),
 
@@ -202,7 +260,16 @@ function browseCard(exercise, day, wave) {
       el('span', { text: plan.reason }),
     ]),
 
-    last ? lastPerformanceLine(last, exercise, units) : null,
+    planCompare({
+      exercise,
+      entry: { targetWeightKg: plan.weightKg, targetReps: plan.perSetReps },
+      last,
+      units,
+      loadPrefs,
+      range,
+      wave,
+    }),
+
     cuesList(exercise),
     exerciseNotes(exercise, day),
   ]);
@@ -215,62 +282,52 @@ function browseCard(exercise, day, wave) {
  * card patches itself; see the re-render policy at the top of this file.
  */
 function loggingCard(exercise, session, wave) {
-  const entry = session.entries.find((item) => item.exerciseId === exercise.id);
-  if (!entry) return null;
+  const raw = session.entries.find((item) => item.exerciseId === exercise.id);
+  if (!raw) return null;
 
+  const entry = normalizeEntry(raw);
   const units = settingsService.getUnits();
+  const prefs = trainingPrefs.getPrefs();
+  const loadPrefs = trainingPrefs.getLoadPrefs();
   const range = repRange(exercise);
-  const increment = incrementFor(exercise);
-  const showRpe = true;
+  const increment = incrementFor(exercise, loadPrefs);
   const last = sessionService.getLastPerformance(exercise.id);
+  const warmupOnly = programService.isWarmupOnly(exercise);
+
+  // "55 kg logged" -> "27.5 kg / hand". Shown under the field so the number you
+  // typed and the load you are lifting are visibly the same thing.
+  const captionFor = (weightKg) => {
+    if (weightKg === null || weightKg === undefined) return null;
+    const descriptor = describeLoad(exercise, weightKg, loadPrefs);
+    if (descriptor.entry === 'machine') return null;   // nothing to derive
+    const primary = formatLoad(descriptor, units);
+    const secondary = formatLoadSecondary(descriptor, units);
+    return secondary ? `${primary} · ${secondary}` : primary;
+  };
 
   const card = el('article.card', { dataset: { exerciseId: exercise.id } });
+  const warmupHost = el('div.set-group.set-group--warmup');
   const setsHost = el('div.ex-card__sets');
   const footHost = el('div.ex-card__foot');
+  const intensityHost = el('div.set-group.set-group--intensity');
+  const painHost = el('div');
 
-  /** Rebuild only this card's rows and footer. */
+  /** Rebuild only this card's rows and footers. */
   const paintCard = () => {
     const current = sessionService.getSessionById(session.id);
-    const currentEntry = current?.entries.find((item) => item.exerciseId === exercise.id);
-    if (!currentEntry) return;
+    const found = current?.entries.find((item) => item.exerciseId === exercise.id);
+    if (!found) return;
+    const live = normalizeEntry(found);
 
-    const allDone = currentEntry.sets.every((set) => set.completed);
+    const working = workingSets(live);
+    const allDone = working.length > 0 && working.every((set) => set.completed);
     card.classList.toggle('ex-card--done', allDone);
 
-    replace(setsHost, currentEntry.sets.map((set, index) =>
-      setRow({
-        index,
-        set,
-        targetReps: currentEntry.targetReps?.[index] ?? range.min,
-        increment,
-        units,
-        showRpe,
-        perSide: Boolean(exercise.reps.perSide),
-        onChange: (patch) => handleSetChange(session.id, exercise, index, patch, paintCard),
-        // Only sets beyond the prescription can be removed, and only then.
-        onRemove: index >= exercise.sets
-          ? () => handleRemoveSet(session.id, exercise.id, index, paintCard)
-          : null,
-      })
-    ));
-
-    replace(footHost, [
-      el('button.btn.btn--sm.btn--ghost', {
-        type: 'button',
-        on: { click: () => handleAddSet(session.id, exercise.id, paintCard) },
-      }, [icon('plus', { className: 'btn__icon' }), el('span', { text: 'Add set' })]),
-      el('span.spacer'),
-      earnedAdvance(exercise, currentEntry.sets)
-        ? el('span.pill.pill--success', {}, [
-            icon('check', { size: 13 }),
-            el('span', { text: `Next: +${trimNumber(increment, 2)} kg` }),
-          ])
-        : allDone
-          ? el('span.pill', { text: 'Hold this weight' })
-          : el('span.t-caption.t-faint', {
-              text: `${currentEntry.sets.filter((s) => s.completed).length}/${currentEntry.sets.length} done`,
-            }),
-    ]);
+    paintWarmup(warmupHost, { exercise, entry: live, session, units, increment, captionFor, paintCard, warmupOnly });
+    paintWorking(setsHost, { exercise, entry: live, session, units, increment, range, captionFor, paintCard, warmupOnly });
+    paintFoot(footHost, { exercise, entry: live, session, units, increment, allDone, paintCard, warmupOnly });
+    paintIntensity(intensityHost, { exercise, entry: live, session, units, increment, captionFor, paintCard });
+    paintPain(painHost, { exercise, entry: live, session, paintCard });
   };
 
   // dom.js `append`, not the native Element.append: the native one stringifies
@@ -278,27 +335,561 @@ function loggingCard(exercise, session, wave) {
   append(card, [
     exerciseHead(exercise, entry),
     exerciseArt(exercise),
-    el('div.ex-card__meta', {}, [
+    warmupOnly ? null : el('div.ex-card__meta', {}, [
       metaPill('Reps', exercise.reps.label),
       metaPill('Rest', exercise.rest.label),
-      entry.targetWeightKg !== null
-        ? metaPill('Target', `${trimNumber(displayWeight(entry.targetWeightKg, units), 2)} ${units}`, 'accent')
+      entry.targetWeightKg !== null && entry.targetWeightKg !== undefined
+        ? metaPill(
+            'Target',
+            formatLoad(describeLoad(exercise, entry.targetWeightKg, loadPrefs), units),
+            'accent'
+          )
         : null,
     ]),
-    entry.planReason
+    warmupOnly ? warmupOnlyBlurb(exercise) : null,
+    entry.planReason && !warmupOnly
       ? el('div.ex-card__plan', {}, [
           el('span.t-semibold', { text: `${actionLabel(entry.plannedAction)} · ` }),
           el('span', { text: entry.planReason }),
         ])
       : null,
-    last ? lastPerformanceLine(last, exercise, units) : null,
+    // Last session vs today, side by side — the comparison the brief asked for.
+    warmupOnly ? null : planCompare({ exercise, entry, last, units, loadPrefs, range, wave }),
+    difficultyPicker({ exercise, entry, session }),
+    warmupHost,
     setsHost,
     footHost,
+    intensityHost,
+    painHost,
     exerciseNotes(exercise, programService.getDayById(session.dayId)),
   ]);
 
   paintCard();
   return card;
+}
+
+/* --- Warm-up / ramp section -------------------------------------------- */
+
+/**
+ * Ramp-up sets, above the working sets and clearly apart from them.
+ *
+ * Always offered, even where the program prescribes no ramp: the brief asks
+ * that a warm-up set can be added to any exercise. What the program *does*
+ * prescribe is pre-filled; everywhere else the section only appears once the
+ * user adds a row.
+ */
+function paintWarmup(host, { exercise, entry, session, units, increment, captionFor, paintCard, warmupOnly }) {
+  const rows = warmupSets(entry);
+  const enabled = trainingPrefs.warmupEnabled();
+
+  if (!enabled || (!rows.length && !programService.supportsRamp(exercise) && !warmupOnly)) {
+    replace(host, []);
+    return;
+  }
+
+  const done = rows.filter((set) => set.completed).length;
+
+  replace(host, [
+    setGroupHead(
+      warmupOnly ? 'Pre-workout warm-up' : 'Warm-up / ramp sets',
+      rows.length ? `${done}/${rows.length}` : 'not counted as working sets'
+    ),
+
+    ...rows.map((set, index) => setRow({
+      index,
+      set,
+      targetReps: null,
+      increment,
+      units,
+      showRpe: false,
+      variant: warmupOnly ? 'reps-only' : 'warmup',
+      indexLabel: `W${index + 1}`,
+      // A bodyweight warm-up movement is logged as reps. No weight field.
+      showWeight: !warmupOnly,
+      captionFor: warmupOnly ? null : captionFor,
+      onChange: (patch) => {
+        sessionService.updateWarmupSet(session.id, exercise.id, index, patch)
+          .then(paintCard)
+          .catch((error) => toast(error.message || 'Could not save that warm-up set', 'danger'));
+      },
+      onRemove: () => {
+        sessionService.removeWarmupSet(session.id, exercise.id, index)
+          .then(paintCard)
+          .catch((error) => toast(error.message || 'Could not remove that set', 'danger'));
+      },
+    })),
+
+    el('div.row', { style: { gap: 'var(--s-2)', marginTop: 'var(--s-1)', flexWrap: 'wrap' } }, [
+      el('button.btn.btn--ghost.btn--sm', {
+        type: 'button',
+        on: {
+          click: () => sessionService.addWarmupSet(session.id, exercise.id)
+            .then(paintCard)
+            .catch((error) => toast(error.message || 'Could not add a warm-up set', 'danger')),
+        },
+      }, [icon('plus', { className: 'btn__icon' }), el('span', { text: 'Add warm-up set' })]),
+      !warmupOnly && entry.targetWeightKg
+        ? el('button.btn.btn--ghost.btn--sm', {
+            type: 'button',
+            title: 'Fill the ramp from today\'s working weight',
+            on: {
+              click: () => sessionService.suggestWarmup(session.id, exercise.id)
+                .then(paintCard)
+                .catch((error) => toast(error.message || 'Could not build a ramp', 'danger')),
+            },
+          }, [el('span', { text: 'Suggest ramp' })])
+        : null,
+    ]),
+  ]);
+}
+
+/* --- Working sets ------------------------------------------------------ */
+
+function paintWorking(host, { exercise, entry, session, units, increment, range, captionFor, paintCard, warmupOnly }) {
+  if (warmupOnly) {
+    replace(host, []);
+    return;
+  }
+
+  const sets = workingSets(entry);
+  const done = sets.filter((set) => set.completed).length;
+  const legacy = isLegacyEntry(entry);
+
+  replace(host, [
+    setGroupHead(
+      legacy ? 'Logged sets (unclassified)' : 'Working sets',
+      `${done}/${sets.length}`,
+      'working'
+    ),
+    ...sets.map((set, index) => setRow({
+      index,
+      set,
+      targetReps: entry.targetReps?.[index] ?? range.min,
+      increment,
+      units,
+      showRpe: true,
+      perSide: Boolean(exercise.reps.perSide),
+      captionFor,
+      onChange: (patch) => handleSetChange(session.id, exercise, index, patch, paintCard),
+      // Only sets beyond the prescription can be removed, and only then.
+      onRemove: index >= exercise.sets
+        ? () => handleRemoveSet(session.id, exercise.id, index, paintCard)
+        : null,
+    })),
+  ]);
+}
+
+function paintFoot(host, { exercise, entry, session, units, increment, allDone, paintCard, warmupOnly }) {
+  if (warmupOnly) {
+    replace(host, []);
+    return;
+  }
+
+  const sets = workingSets(entry);
+  const loadPrefs = trainingPrefs.getLoadPrefs();
+
+  // What the increase is worth in the units the user reads. On a dumbbell pair
+  // "+5 kg" of stored total is "+2.5 kg / hand" on the rack.
+  const incrementLabel = () => {
+    const descriptor = describeLoad(exercise, increment, loadPrefs);
+    if (descriptor.entry === 'total-both') {
+      return `+${trimNumber(displayWeight(descriptor.displayKg, units), 2)} ${units} / hand`;
+    }
+    return `+${trimNumber(displayWeight(increment, units), 2)} ${units}`;
+  };
+
+  replace(host, [
+    el('button.btn.btn--sm.btn--ghost', {
+      type: 'button',
+      on: { click: () => handleAddSet(session.id, exercise.id, paintCard) },
+    }, [icon('plus', { className: 'btn__icon' }), el('span', { text: 'Add set' })]),
+    el('span.spacer'),
+    earnedAdvance(exercise, sets)
+      ? el('span.pill.pill--success', {}, [
+          icon('check', { size: 13 }),
+          el('span', { text: `Next: ${incrementLabel()}` }),
+        ])
+      : allDone
+        ? el('span.pill', { text: 'Hold this weight' })
+        : el('span.t-caption.t-faint', {
+            text: `${sets.filter((s) => s.completed).length}/${sets.length} done`,
+          }),
+  ]);
+}
+
+/* --- Intensity techniques ---------------------------------------------- */
+
+function paintIntensity(host, { exercise, entry, session, units, increment, captionFor, paintCard }) {
+  const sequences = intensitySequences(entry);
+  const allowedHere = programService.allowsIntensityTechniques(exercise);
+  const allowDrop = allowedHere && trainingPrefs.dropSetsEnabled();
+  const allowFailure = allowedHere && trainingPrefs.failureSetsEnabled();
+
+  if (!sequences.length && !allowDrop && !allowFailure) {
+    replace(host, []);
+    return;
+  }
+
+  const fail = (error) => toast(error.message || 'Could not save that', 'danger');
+  const run = (promise) => promise.then(paintCard).catch(fail);
+
+  replace(host, [
+    // The composition line goes below the blocks, not in the group header: it is
+    // a sentence, and squeezing it onto the label row crushes both.
+    sequences.length
+      ? setGroupHead('Optional intensity technique', '', 'intensity')
+      : null,
+
+    ...sequences.map((sequence) => intensityBlock({
+      sequence,
+      units,
+      increment,
+      captionFor,
+      renderRow: setRow,
+      onStageChange: (stageIndex, patch) => run(sessionService.updateIntensityStage(
+        session.id, exercise.id, sequence.id, stageIndex, patch
+      )),
+      onAddStage: () => run(sessionService.addDropStage(session.id, exercise.id, sequence.id)),
+      onRemoveStage: (stageIndex) => run(sessionService.removeDropStage(
+        session.id, exercise.id, sequence.id, stageIndex
+      )),
+      onRemove: () => run(sessionService.removeIntensitySequence(session.id, exercise.id, sequence.id)),
+      onNoteChange: (note) => run(sessionService.updateIntensitySequence(
+        session.id, exercise.id, sequence.id, { note }
+      )),
+    })),
+
+    el('div', { style: { marginTop: 'var(--s-2)' } }, [
+      intensityActions({
+        allowDrop,
+        allowFailure,
+        onAddDrop: () => run(sessionService.addDropSet(session.id, exercise.id)),
+        onAddFailure: () => run(sessionService.addFailureSet(session.id, exercise.id)),
+      }),
+    ]),
+
+    sequences.length
+      ? el('p.t-caption.t-faint', {
+          text: `${describeComposition(entry)}. Intensity work is kept out of progression and out `
+            + 'of your working-set volume, and is reported separately.',
+          style: { marginTop: 'var(--s-2)' },
+        })
+      : null,
+  ]);
+}
+
+/* --- Pain-aware logging ------------------------------------------------ */
+
+/**
+ * Optional discomfort logging.
+ *
+ * Shown on pain-aware movements, and available on any exercise once something
+ * has been logged. Deliberately not diagnostic: it records a number, a place
+ * and what the user decided to do, and nothing else. The guidance line is
+ * informational and says to seek a professional assessment rather than
+ * offering one.
+ */
+function paintPain(host, { exercise, entry, session, paintCard }) {
+  const painAware = programService.isPainAware(exercise) && trainingPrefs.painAwareEnabled();
+  const logged = entry.pain;
+
+  if (!painAware && !logged) {
+    replace(host, []);
+    return;
+  }
+
+  if (!logged) {
+    replace(host, [
+      el('button.btn.btn--ghost.btn--sm', {
+        type: 'button',
+        style: { marginTop: 'var(--s-2)' },
+        on: { click: () => openPainSheet(session.id, exercise, entry, paintCard) },
+      }, [
+        icon('heart', { className: 'btn__icon' }),
+        el('span', { text: 'Log pain or discomfort' }),
+      ]),
+    ]);
+    return;
+  }
+
+  const alternative = (programService.getAlternatives(exercise) ?? [])
+    .find((item) => item.id === logged.alternativeId);
+
+  replace(host, [
+    el('div.pain-panel.pain-panel--logged', {}, [
+      el('div.row.row--between', {}, [
+        el('div', { style: { minWidth: 0 } }, [
+          el('div.t-footnote.t-semibold', { text: `Discomfort ${logged.score}/10` }),
+          el('div.t-caption.t-dim', {
+            text: [
+              logged.location || null,
+              PAIN_ACTION_LABELS[logged.action] ?? null,
+              alternative ? `switched to ${alternative.label}` : null,
+            ].filter(Boolean).join(' · ') || 'Logged',
+          }),
+        ]),
+        el('button.btn.btn--ghost.btn--sm', {
+          type: 'button',
+          text: 'Edit',
+          on: { click: () => openPainSheet(session.id, exercise, entry, paintCard) },
+        }),
+      ]),
+      logged.note
+        ? el('p.t-caption.t-dim', { text: logged.note, style: { marginTop: 'var(--s-2)' } })
+        : null,
+      el('p.pain-panel__guidance', {
+        text: 'Do not force painful repetitions. Consider a pain-free alternative, and seek '
+          + 'professional assessment if the problem persists.',
+      }),
+    ]),
+  ]);
+}
+
+/**
+ * The pain sheet: a 0-10 scale, a location, what you did about it, and an
+ * optional substitution. Every field optional except the score.
+ */
+async function openPainSheet(sessionId, exercise, entry, paintCard) {
+  const existing = entry.pain ?? {};
+  let score = Number(existing.score ?? 0);
+  let action = existing.action ?? PAIN_ACTION.COMPLETED;
+  let alternativeId = existing.alternativeId ?? null;
+
+  const dots = [];
+  const scale = el('div.pain-panel__scale', {}, Array.from({ length: 11 }, (_, value) => {
+    const dot = el('button.pain-panel__dot', {
+      type: 'button',
+      text: String(value),
+      'aria-pressed': value === score ? 'true' : 'false',
+      'aria-label': `Discomfort ${value} out of 10`,
+      on: {
+        click: () => {
+          score = value;
+          for (const other of dots) {
+            other.setAttribute('aria-pressed', Number(other.textContent) === score ? 'true' : 'false');
+          }
+        },
+      },
+    });
+    dots.push(dot);
+    return dot;
+  }));
+
+  const locationInput = el('input.input', {
+    type: 'text',
+    value: existing.location ?? '',
+    placeholder: 'Location (optional) — e.g. right elbow',
+    'aria-label': 'Location of the discomfort',
+  });
+
+  const noteInput = el('input.input', {
+    type: 'text',
+    value: existing.note ?? '',
+    placeholder: 'Notes (optional)',
+    'aria-label': 'Notes about the discomfort',
+  });
+
+  const actionSelect = el('select.input', {
+    'aria-label': 'What you did',
+    on: { change: (event) => { action = event.target.value; } },
+  }, Object.values(PAIN_ACTION).map((value) => el('option', {
+    value,
+    text: PAIN_ACTION_LABELS[value],
+    selected: value === action,
+  })));
+
+  const alternatives = programService.getAlternatives(exercise);
+  const altSelect = alternatives.length
+    ? el('select.input', {
+        'aria-label': 'Alternative exercise',
+        on: { change: (event) => { alternativeId = event.target.value || null; } },
+      }, [
+        el('option', { value: '', text: 'No substitution', selected: !alternativeId }),
+        ...alternatives.map((item) => el('option', {
+          value: item.id,
+          text: item.label,
+          selected: item.id === alternativeId,
+        })),
+      ])
+    : null;
+
+  const choice = await openSheet({
+    title: 'Pain or discomfort',
+    text: 'Logged so the app stops reading a short session as lost strength. Nothing here is a diagnosis.',
+    body: el('div.stack', { style: { gap: 'var(--s-3)' } }, [
+      el('div', {}, [
+        el('span.field__label', { text: 'How much, 0-10' }),
+        scale,
+      ]),
+      locationInput,
+      el('div', {}, [
+        el('span.field__label', { text: 'What you did' }),
+        actionSelect,
+      ]),
+      altSelect
+        ? el('div', {}, [
+            el('span.field__label', { text: 'Switched to' }),
+            altSelect,
+            el('span.t-caption.t-faint', {
+              text: 'Nothing is replaced automatically — this records what you chose.',
+            }),
+          ])
+        : null,
+      noteInput,
+    ]),
+    actions: [
+      { label: 'Save', value: 'save', tone: 'primary' },
+      entry.pain ? { label: 'Remove log', value: 'clear', tone: 'plain' } : null,
+      { label: 'Cancel', value: false, tone: 'plain' },
+    ].filter(Boolean),
+  });
+
+  if (choice === 'save') {
+    try {
+      await sessionService.setPain(sessionId, exercise.id, {
+        score,
+        location: locationInput.value,
+        note: noteInput.value,
+        action,
+        alternativeId,
+      });
+      paintCard();
+      toast('Discomfort logged');
+    } catch (error) {
+      toast(error.message || 'Could not save that', 'danger');
+    }
+  } else if (choice === 'clear') {
+    try {
+      await sessionService.clearPain(sessionId, exercise.id);
+      paintCard();
+    } catch (error) {
+      toast(error.message || 'Could not remove that log', 'danger');
+    }
+  }
+}
+
+/* --- Difficulty ladder ------------------------------------------------- */
+
+/**
+ * Which rung of the difficulty ladder today's sets are being worked at.
+ * Only for difficulty-first movements — the ab wheel, today.
+ */
+function difficultyPicker({ exercise, entry, session }) {
+  if (exercise.progression?.mode !== 'difficulty-first') return null;
+  if (!trainingPrefs.difficultyProgressionEnabled()) return null;
+
+  const ladder = difficultyLadder(exercise);
+  const currentId = entry.difficulty ?? ladder[0].id;
+  const current = difficultyRung(exercise, currentId);
+
+  const select = el('select.input', {
+    'aria-label': 'Difficulty',
+    on: {
+      change: (event) => {
+        sessionService.setDifficulty(session.id, exercise.id, event.target.value)
+          .then(() => refresh())
+          .catch((error) => toast(error.message || 'Could not save that', 'danger'));
+      },
+    },
+  }, ladder.map((rung) => el('option', {
+    value: rung.id,
+    text: rung.label,
+    selected: rung.id === currentId,
+  })));
+
+  return el('div', { style: { marginTop: 'var(--s-3)' } }, [
+    el('span.field__label', { text: 'Difficulty' }),
+    select,
+    el('span.t-caption.t-faint', { text: current?.note ?? '' }),
+    el('p.t-caption.t-faint', {
+      text: 'Progression: build clean reps → improve control/range → increase difficulty → '
+        + 'optional external resistance.',
+      style: { marginTop: 'var(--s-2)' },
+    }),
+  ]);
+}
+
+/* --- Last session vs today --------------------------------------------- */
+
+/**
+ * The two figures that actually decide what to load: what was done last time,
+ * and what to do today. Working sets only on both sides.
+ */
+function planCompare({ exercise, entry, last, units, loadPrefs, range, wave }) {
+  const target = entry.targetWeightKg;
+  const setCount = entry.targetReps?.length ?? exercise.sets;
+
+  const lastDescriptor = last && last.sets.length
+    ? describeLoad(exercise, Math.max(...last.sets.map((set) => set.weightKg ?? 0)) || null, loadPrefs)
+    : null;
+  const todayDescriptor = target === null || target === undefined
+    ? null
+    : describeLoad(exercise, target, loadPrefs);
+
+  return el('div.plan-compare', {}, [
+    el('div.plan-compare__col', {}, [
+      el('div.plan-compare__label', { text: 'Last session' }),
+      el('div.plan-compare__value', {
+        text: last && last.sets.length
+          ? (lastDescriptor?.displayKg ? formatLoad(lastDescriptor, units) : 'Bodyweight')
+          : '—',
+      }),
+      el('div.plan-compare__meta', {
+        text: last && last.sets.length
+          ? last.sets.map((set) => set.reps ?? 0).join(' / ')
+          : 'No history yet',
+      }),
+      last
+        ? el('div.t-micro.t-faint', {
+            text: [
+              relativeDay(last.date),
+              last.painLimited ? 'pain-limited' : null,
+              last.legacy ? 'unclassified' : null,
+              last.warmupSets?.length ? `${last.warmupSets.length} warm-up` : null,
+              last.intensitySets?.length
+                ? pluralize(last.intensitySets.length, 'intensity set')
+                : null,
+            ].filter(Boolean).join(' · '),
+            style: { marginTop: '2px' },
+          })
+        : null,
+    ]),
+    el('div.plan-compare__col', {}, [
+      el('div.plan-compare__label', { text: wave.isDeload ? 'Today · deload' : 'Today' }),
+      el('div.plan-compare__value', {
+        text: todayDescriptor ? formatLoad(todayDescriptor, units) : 'Your choice',
+      }),
+      el('div.plan-compare__meta', {
+        text: `${range.label} reps × ${setCount} ${setCount === 1 ? 'set' : 'sets'}`,
+      }),
+      todayDescriptor && formatLoadSecondary(todayDescriptor, units)
+        ? el('div.t-micro.t-faint', {
+            text: formatLoadSecondary(todayDescriptor, units),
+            style: { marginTop: '2px' },
+          })
+        : null,
+    ]),
+  ]);
+}
+
+/* --- Small pieces ------------------------------------------------------ */
+
+function setGroupHead(label, hint = '', tone = 'warmup') {
+  return el('div.set-group__head', {}, [
+    el('span.set-group__label', { text: label }),
+    el('span.set-group__rule'),
+    hint ? el('span.t-micro.t-faint', { text: hint }) : null,
+  ]);
+}
+
+function warmupOnlyBlurb(exercise) {
+  return el('div.ex-card__plan', {}, [
+    el('span.t-semibold', { text: 'Optional warm-up · ' }),
+    el('span', {
+      text: `${exercise.reps?.label ?? '8-15'} reps, 1-2 sets, not to failure. `
+        + 'Not counted as working sets or as chest volume.',
+    }),
+  ]);
 }
 
 /**
@@ -359,36 +950,32 @@ function exerciseHead(exercise, entry = null) {
         style: { marginTop: '1px' },
       }),
     ]),
-    entry && exercise.progression.mode === 'reps-first'
-      ? el('span.pill.pill--warning', { text: 'reps first' })
-      : null,
+    exercisePill(exercise, entry),
   ]);
+}
+
+/** One badge, chosen by what most changes how this exercise is logged. */
+function exercisePill(exercise, entry) {
+  if (programService.isWarmupOnly(exercise)) {
+    return el('span.pill', { text: 'warm-up' });
+  }
+  if (programService.isPainAware(exercise) && trainingPrefs.painAwareEnabled()) {
+    return el('span.pill', { text: 'pain-aware' });
+  }
+  if (!entry) return null;
+  if (exercise.progression?.mode === 'difficulty-first') {
+    return el('span.pill.pill--warning', { text: 'difficulty first' });
+  }
+  if (exercise.progression?.mode === 'reps-first') {
+    return el('span.pill.pill--warning', { text: 'reps first' });
+  }
+  return null;
 }
 
 function metaPill(label, value, tone = '') {
   return el(`span.pill${tone ? `.pill--${tone}` : ''}`, {}, [
     el('span', { text: `${label} `, style: { opacity: '0.6' } }),
     el('span.t-semibold.tnum', { text: value }),
-  ]);
-}
-
-/** "Last: 27.5 kg × 8, 8, 7, 6 · 5 days ago" */
-function lastPerformanceLine(last, exercise, units) {
-  const range = repRange(exercise);
-  const reps = last.sets.map((set) => set.reps ?? 0);
-  const weight = Math.max(...last.sets.map((set) => set.weightKg ?? 0));
-
-  return el('p.t-caption.t-dim', { style: { marginTop: 'var(--s-2)' } }, [
-    el('span.t-semibold', { text: 'Last: ' }),
-    el('span.tnum', {
-      text: weight > 0
-        ? `${trimNumber(displayWeight(weight, units), 2)} ${units} × ${reps.join(', ')}`
-        : `${reps.join(', ')} reps`,
-    }),
-    el('span.t-faint', { text: ` · ${relativeDay(last.date)}` }),
-    reps.every((count) => count >= range.max)
-      ? el('span.t-accent', { text: ' · hit the top of the range' })
-      : null,
   ]);
 }
 
@@ -603,17 +1190,70 @@ async function showSummary(sessionId) {
   const units = settingsService.getUnits();
 
   const body = [
-    sheetRow('Sets completed', `${summary.completion.done}/${summary.completion.total}`, { iconName: 'check' }),
+    sheetRow('Working sets', `${summary.completion.done}/${summary.completion.total}`, { iconName: 'check' }),
+    summary.warmupSetCount
+      ? sheetRow('Warm-up sets', String(summary.warmupSetCount), { iconName: 'flame' })
+      : null,
+    summary.dropSequences || summary.failureSets
+      ? sheetRow(
+          'Intensity work',
+          [
+            summary.dropSequences ? pluralize(summary.dropSequences, 'drop set') : null,
+            summary.failureSets ? pluralize(summary.failureSets, 'failure set') : null,
+          ].filter(Boolean).join(' · '),
+          { iconName: 'flame' }
+        )
+      : null,
     sheetRow('Exercises', String(summary.exercisesDone), { iconName: 'dumbbell' }),
     sheetRow(
-      'Volume',
-      `${trimNumber(displayWeight(summary.volumeKg, units), 0)} ${units}`,
+      'Working volume',
+      `${trimNumber(displayWeight(summary.volume.workingKg, units), 0)} ${units}`,
       { iconName: 'chart' }
     ),
+    summary.volume.warmupKg || summary.volume.intensityKg
+      ? sheetRow(
+          'Other volume',
+          [
+            summary.volume.warmupKg
+              ? `${trimNumber(displayWeight(summary.volume.warmupKg, units), 0)} warm-up`
+              : null,
+            summary.volume.intensityKg
+              ? `${trimNumber(displayWeight(summary.volume.intensityKg, units), 0)} intensity`
+              : null,
+          ].filter(Boolean).join(' · ') + ` ${units}`,
+          { iconName: 'chart' }
+        )
+      : null,
     summary.durationSeconds
       ? sheetRow('Duration', formatDuration(summary.durationSeconds), { iconName: 'timer' })
       : null,
   ].filter(Boolean);
+
+  if (summary.painLimited.length) {
+    body.push(
+      el('p.t-overline', { text: 'Logged discomfort', style: { marginTop: 'var(--s-4)' } }),
+      ...summary.painLimited.map((item) =>
+        el('div.sheet__row', {}, [
+          icon('heart', { size: 16 }),
+          el('div', { style: { minWidth: 0 } }, [
+            el('div.t-subhead.t-truncate', { text: item.name }),
+            el('div.t-caption.t-faint', {
+              text: [
+                item.pain ? `${item.pain.score}/10` : null,
+                item.pain?.location || null,
+                item.pain ? PAIN_ACTION_LABELS[item.pain.action] : null,
+              ].filter(Boolean).join(' · '),
+            }),
+          ]),
+        ])
+      ),
+      el('p.t-caption.t-faint', {
+        text: 'Not counted as a strength regression. Do not force painful repetitions; seek '
+          + 'professional assessment if it persists.',
+        style: { marginTop: 'var(--s-2)' },
+      })
+    );
+  }
 
   if (summary.advancing.length) {
     body.push(

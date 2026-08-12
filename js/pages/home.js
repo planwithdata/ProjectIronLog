@@ -9,8 +9,8 @@
  * on day one there is no history and a wall of "0 kg" would read as data.
  */
 
-import { el, icon } from '../core/dom.js';
-import { go } from '../core/router.js';
+import { el, icon, append } from '../core/dom.js';
+import { go, refresh } from '../core/router.js';
 import {
   weekdayName, today, displayWeight, trimNumber, formatDuration,
   formatDayCount, relativeDay, pluralize,
@@ -21,8 +21,10 @@ import * as bodyService from '../services/body-service.js';
 import * as notesService from '../services/notes-service.js';
 import * as prService from '../services/pr-service.js';
 import * as settingsService from '../services/settings-service.js';
+import * as reminderService from '../services/reminder-service.js';
 import { percentRing } from '../../components/ring.js';
 import { stat, sectionHead, emptyState } from '../../components/stat.js';
+import { openWeightSheet } from '../../components/weight-entry.js';
 
 export function render() {
   const dayKey = today();
@@ -31,6 +33,7 @@ export function render() {
   const active = sessionService.getActiveSession();
 
   const page = el('div.page.enter', {}, [
+    morningWeightReminder(dayKey),
     heroCard({ day, wave, active, dayKey }),
     todayFocus(day),
     weekCard(dayKey),
@@ -41,6 +44,53 @@ export function render() {
   ]);
 
   return page;
+}
+
+/* --- Morning weigh-in reminder -----------------------------------------
+   Sits above the hero card, in the page flow, and never over it. Tapping Skip
+   removes it; ignoring it removes it tomorrow. Either way the Start Workout
+   button below is reachable the whole time.
+   ====================================================================== */
+
+function morningWeightReminder(dayKey) {
+  if (!reminderService.shouldPromptForWeight(dayKey)) return null;
+
+  const banner = el('div.reminder', { role: 'status' });
+
+  // Recorded on render, not on dismissal: a reload must not bring it back.
+  reminderService.markPrompted(dayKey).catch((error) => {
+    console.warn('[home] could not record the weigh-in prompt:', error);
+  });
+
+  const dismiss = () => banner.remove();
+
+  append(banner, [
+    el('div.list__icon', {}, [icon('scale')]),
+    el('div.reminder__body', {}, [
+      el('div.reminder__title', { text: 'Good morning. Log today\'s weight?' }),
+      el('div.reminder__sub', { text: 'Takes a second, and the trend needs most mornings.' }),
+    ]),
+    el('div.reminder__actions', {}, [
+      el('button.btn.btn--tinted.btn--sm', {
+        type: 'button',
+        text: 'Enter Weight',
+        on: {
+          click: async () => {
+            const saved = await openWeightSheet({ dayKey });
+            dismiss();
+            if (saved) refresh();
+          },
+        },
+      }),
+      el('button.btn.btn--ghost.btn--sm', {
+        type: 'button',
+        text: 'Skip',
+        on: { click: dismiss },
+      }),
+    ]),
+  ]);
+
+  return banner;
 }
 
 /* --- Hero: today's workout --------------------------------------------- */
@@ -71,9 +121,12 @@ function heroCard({ day, wave, active, dayKey }) {
   ];
 
   if (isTraining) {
-    const exerciseCount = day.exercises.length;
+    // The optional pre-workout warm-up is excluded from both counts: it
+    // prescribes no working sets, and counting it would overstate the session.
+    const working = programService.getWorkingExercises(day);
+    const exerciseCount = working.length;
     const setCount = wave.isDeload
-      ? day.exercises.reduce((sum, ex) => sum + programService.deloadSets(ex.sets), 0)
+      ? working.reduce((sum, ex) => sum + programService.deloadSets(ex.sets), 0)
       : programService.countSets(day);
 
     children.push(
@@ -152,7 +205,7 @@ function metaItem(iconName, label) {
  */
 function estimateDuration(day, isDeload) {
   const WORK_SECONDS_PER_SET = 40;
-  return day.exercises.reduce((total, exercise) => {
+  return programService.getWorkingExercises(day).reduce((total, exercise) => {
     const sets = isDeload ? programService.deloadSets(exercise.sets) : exercise.sets;
     const rest = exercise.rest?.seconds ?? 60;
     // The final set of an exercise needs no rest before the next movement.
@@ -242,7 +295,11 @@ function bodyStats() {
   const toGoal = latestWeight && goalKg ? goalKg - latestWeight.weightKg : null;
 
   return el('section', {}, [
-    sectionHead('Body', { hint: latestWeight ? relativeDay(latestWeight.date) : null }),
+    sectionHead('Body', {
+      hint: latestWeight ? relativeDay(latestWeight.date) : null,
+      action: 'Log weight',
+      onAction: async () => { if (await openWeightSheet()) refresh(); },
+    }),
     el('div.grid.grid--auto', {}, [
       stat({
         label: 'Body weight',

@@ -28,6 +28,15 @@ import { trimNumber, displayWeight, storeWeight } from '../js/core/format.js';
  * @param {string} options.units            'kg' | 'lb' for display
  * @param {boolean} options.showRpe
  * @param {boolean} options.perSide         reps are per side
+ * @param {string} [options.variant]        'working' | 'warmup' | 'drop'
+ * @param {string} [options.indexLabel]     overrides the set number ("W1", "D2")
+ * @param {boolean} [options.showWeight]    false for movements logged as reps only
+ * @param {(weightKg: number|null) => string|null} [options.captionFor]
+ *        Derived reading of the entered load — "27.5 kg / hand" under a logged
+ *        55. Recomputed live as the field changes, because the whole point of
+ *        the caption is to confirm that the number you typed means what you
+ *        think it means.
+ * @param {Node} [options.extra]            appended after the RPE control
  * @param {(patch: object) => void} options.onChange
  * @param {() => void} [options.onRemove]
  */
@@ -39,6 +48,11 @@ export function setRow({
   units = 'kg',
   showRpe = false,
   perSide = false,
+  variant = 'working',
+  indexLabel = null,
+  showWeight = true,
+  captionFor = null,
+  extra = null,
   onChange,
   onRemove = null,
 }) {
@@ -130,13 +144,34 @@ export function setRow({
       ])
     : null;
 
+  /* --- Derived load caption -------------------------------------------- */
+
+  const caption = captionFor
+    ? el('span.set-row__caption', { text: captionFor(set.weightKg) ?? '' })
+    : null;
+
+  if (caption) {
+    const repaint = () => {
+      const raw = weightInput.value.replace(',', '.');
+      const value = raw === '' ? null : storeWeight(Number(raw), units);
+      caption.textContent = (Number.isNaN(Number(raw)) ? null : captionFor(value)) ?? '';
+    };
+    weightInput.addEventListener('input', repaint);
+    // The steppers set `.value` directly, which fires no input event.
+    weightGroup.addEventListener('click', () => requestAnimationFrame(repaint));
+  }
+
   /* --- Row ------------------------------------------------------------- */
 
-  const row = el(`div.set-row${isDone ? '.set-row--done' : ''}`, {
-    dataset: { setIndex: String(index) },
+  const classes = ['set-row'];
+  if (isDone) classes.push('set-row--done');
+  if (variant && variant !== 'working') classes.push(`set-row--${variant}`);
+
+  const row = el(`div.${classes.join('.')}`, {
+    dataset: { setIndex: String(index), variant },
   }, [
     el('div.set-row__index', {}, [
-      el('span.t-caption.t-semibold', { text: String(index + 1) }),
+      el('span.t-caption.t-semibold', { text: indexLabel ?? String(index + 1) }),
       targetReps
         ? el('span.set-row__target', {
             text: `×${targetReps}`,
@@ -144,9 +179,10 @@ export function setRow({
           })
         : null,
     ]),
-    weightGroup,
+    showWeight ? weightGroup : null,
     repsGroup,
     rpe,
+    extra,
     check,
   ]);
 
@@ -154,7 +190,11 @@ export function setRow({
   // would be four more targets competing with the checkmark.
   if (onRemove) attachLongPress(row.querySelector('.set-row__index'), onRemove);
 
-  return row;
+  if (!caption) return row;
+
+  // The caption sits beneath the controls rather than inside them: the row is
+  // already at the limit of what fits across a phone.
+  return el('div.set-row-group', {}, [row, el('div.set-row__captions', {}, [caption])]);
 }
 
 /* --- Building blocks ---------------------------------------------------- */

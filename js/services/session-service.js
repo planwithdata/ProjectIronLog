@@ -11,7 +11,12 @@
  *     entries: [{
  *       exerciseId,                       // links back to workouts.json
  *       targetWeightKg, targetReps,       // what the engine prescribed
- *       sets: [{ weightKg, reps, completed, rpe }],
+ *       setModel: 'v2' | 'legacy',
+ *       sets: [{ weightKg, reps, completed, rpe, kind }],   // WORKING SETS
+ *       warmupSets: [{ weightKg, reps, completed, kind }],  // ramp-up work
+ *       intensitySets: [{ id, type, stages: [...] }],       // drop / failure
+ *       pain: null | { score, location, note, action, alternativeId },
+ *       difficulty: null | string,
  *       notes,
  *     }],
  *   }
@@ -20,6 +25,12 @@
  * that replacing workouts.json cannot orphan history. It does keep the
  * target it was given, because a report needs to say what was asked for as
  * well as what was done.
+ *
+ * `entry.sets` holds working sets and nothing else. That is the load-bearing
+ * decision of the whole set model: it means every existing reader of `sets` —
+ * the progression engine, the PR detector, the CSV export — sees working sets
+ * by default and cannot accidentally include a ramp-up. See
+ * `engine/set-model.js` for the reasoning.
  *
  * At most one session is 'in-progress' at a time: starting a workout while
  * another is open resumes the open one instead of creating a duplicate.
@@ -31,7 +42,15 @@ import { EVENTS, emit } from '../core/events.js';
 import { today, isoWeekday, addDays, daysBetween } from '../core/format.js';
 import * as programService from './program-service.js';
 import * as settingsService from './settings-service.js';
+import * as trainingPrefs from './training-prefs-service.js';
 import { recommend, isEntryComplete, earnedAdvance } from '../engine/progression.js';
+import { volumeMultiplier } from '../engine/loading.js';
+import {
+  SET_KIND, INTENSITY_TYPE, PAIN_ACTION,
+  normalizeEntry, workingSets, completedWorkingSets, warmupSets,
+  completedWarmupSets, intensitySequences, completedIntensityStages,
+  isLegacyEntry, isPainLimited, composition, entryVolume, rampSets as buildRampSets,
+} from '../engine/set-model.js';
 
 /* --- Reads -------------------------------------------------------------- */
 
@@ -65,24 +84,54 @@ export function getLastSessionForDay(dayId) {
 }
 
 /**
- * The last completed sets for one exercise, newest session first.
- * This is what the Workout page shows as "Last workout", and what the
- * progression engine will read in Session 2.
+ * The last completed **working** sets for one exercise, newest session first.
+ *
+ * This is both what the Workout page shows as "Last session" and what the
+ * progression engine reads. Warm-up and intensity work travel alongside it as
+ * separate fields so a report can show them, but `sets` — the field the engine
+ * consumes — is working sets only.
+ *
+ * Each performance also carries the two flags the engine needs to be fair:
+ *
+ *   painLimited  discomfort was logged, or the exercise was cut short for it
+ *   incomplete   fewer working sets were completed than were prescribed
+ *
+ * Neither hides the session. They stop it being read as evidence of getting
+ * weaker, which it is not.
  */
 export function getExerciseHistory(exerciseId, limit = 10) {
   const history = [];
+  const exercise = programService.getExercise(exerciseId);
+  const prescribed = exercise?.sets ?? 0;
+
   for (const session of getCompletedSessions()) {
-    const entry = session.entries.find((item) => item.exerciseId === exerciseId);
-    if (!entry) continue;
-    const workingSets = entry.sets.filter((set) => set.completed);
-    if (!workingSets.length) continue;
+    const raw = session.entries.find((item) => item.exerciseId === exerciseId);
+    if (!raw) continue;
+    const entry = normalizeEntry(raw);
+
+    const done = workingSets(entry).filter((set) => set.completed);
+    const warmups = completedWarmupSets(entry);
+    const intensity = intensitySequences(entry);
+
+    // An entry with no working sets is still worth reporting when it holds
+    // warm-up work, intensity work or a pain log — "I tried and stopped" is
+    // information. It is skipped only when there is genuinely nothing in it.
+    if (!done.length && !warmups.length && !intensity.length && !entry.pain) continue;
+
     history.push({
       sessionId: session.id,
       date: session.date,
       week: session.week,
       isDeload: session.isDeload,
       targetWeightKg: entry.targetWeightKg ?? null,
-      sets: workingSets,
+      sets: done,
+      warmupSets: warmups,
+      intensitySets: intensity,
+      pain: entry.pain ?? null,
+      painLimited: isPainLimited(entry),
+      incomplete: prescribed > 0 && done.length < prescribed,
+      difficulty: entry.difficulty ?? null,
+      legacy: isLegacyEntry(entry),
       notes: entry.notes ?? '',
     });
     if (history.length >= limit) break;
@@ -121,7 +170,13 @@ export async function startSession(dayId, dayKey = today()) {
     week: wave.week,
     waveWeek: wave.waveWeek,
     isDeload: wave.isDeload,
-    entries: day.exercises.map((exercise) => buildEntry(exercise, wave)),
+    entries: day.exercises
+      // The pre-workout warm-up is a preference, so an entry for it is only
+      // created when it is switched on. Turning it off later leaves the
+      // sessions that already logged it untouched.
+      .filter((exercise) =>
+        !programService.isWarmupOnly(exercise) || trainingPrefs.pushupWarmupEnabled())
+      .map((exercise) => buildEntry(exercise, wave)),
   });
 
   emit(EVENTS.WORKOUT_STARTED, { sessionId: session.id, dayId });
@@ -138,6 +193,28 @@ export async function startSession(dayId, dayKey = today()) {
  */
 function buildEntry(exercise, wave) {
   const history = getExerciseHistory(exercise.id, 6);
+  const loadPrefs = trainingPrefs.getLoadPrefs();
+
+  // A warm-up-only movement has no working sets at all, so there is nothing for
+  // the engine to prescribe. It gets warm-up rows and an empty working array,
+  // which is what keeps it out of every working-set calculation for free.
+  if (programService.isWarmupOnly(exercise)) {
+    return {
+      exerciseId: exercise.id,
+      targetWeightKg: null,
+      targetReps: [],
+      plannedAction: null,
+      planReason: exercise.notes ?? '',
+      setModel: 'v2',
+      sets: [],
+      warmupSets: blankWarmupRows(programService.rampSetCount(exercise), exercise.reps?.min ?? null),
+      intensitySets: [],
+      pain: null,
+      difficulty: null,
+      notes: '',
+    };
+  }
+
   const setCount = wave.isDeload
     ? programService.deloadSets(exercise.sets)
     : exercise.sets;
@@ -145,6 +222,7 @@ function buildEntry(exercise, wave) {
   const plan = recommend(exercise, history, {
     isDeload: wave.isDeload,
     setCount,
+    loadPrefs,
   });
 
   return {
@@ -153,6 +231,7 @@ function buildEntry(exercise, wave) {
     targetReps: plan.perSetReps,
     plannedAction: plan.action,
     planReason: plan.reason,
+    setModel: 'v2',
     // Each slot is pre-filled with the recommended load and rep target so the
     // common case is one tap on the checkmark, not four fields of typing.
     // A pyramid supplies a load per set; everything else shares one.
@@ -161,9 +240,53 @@ function buildEntry(exercise, wave) {
       reps,
       completed: false,
       rpe: null,
+      kind: SET_KIND.WORKING,
     })),
+    warmupSets: prefilledRamp(exercise, plan),
+    intensitySets: [],
+    pain: null,
+    // Carry the difficulty rung forward: a difficulty-first movement's plan
+    // says which rung to work at, and the log has to remember which one it was.
+    difficulty: plan.difficulty ?? null,
     notes: '',
   };
+}
+
+/**
+ * Ramp-up rows for a compound lift, pre-filled from the working weight.
+ *
+ * Empty for anything the program does not prescribe a ramp for, and empty when
+ * the preference is off. On a first-ever session there is no working weight to
+ * compute percentages from, so blank rows are offered instead of invented loads.
+ */
+function prefilledRamp(exercise, plan) {
+  if (!trainingPrefs.warmupEnabled()) return [];
+  if (!programService.supportsRamp(exercise)) return [];
+
+  const count = Math.min(
+    trainingPrefs.warmupSetCount(programService.rampSetCount(exercise)),
+    programService.rampSetCount(exercise)
+  );
+
+  const step = plan.increment || 2.5;
+  const rungs = buildRampSets(plan.weightKg, count, step);
+  if (!rungs.length) return blankWarmupRows(count, null);
+
+  return rungs.map((rung) => ({
+    weightKg: rung.weightKg,
+    reps: rung.reps,
+    completed: false,
+    kind: SET_KIND.WARMUP,
+  }));
+}
+
+function blankWarmupRows(count, reps) {
+  return Array.from({ length: Math.max(0, count) }, () => ({
+    weightKg: null,
+    reps,
+    completed: false,
+    kind: SET_KIND.WARMUP,
+  }));
 }
 
 /**
@@ -178,6 +301,7 @@ export function getRecommendation(exercise, dayKey = today()) {
   return recommend(exercise, getExerciseHistory(exercise.id, 6), {
     isDeload: wave.isDeload,
     setCount,
+    loadPrefs: trainingPrefs.getLoadPrefs(),
   });
 }
 
@@ -277,6 +401,7 @@ export async function addSet(sessionId, exerciseId) {
         reps: last?.reps ?? null,
         completed: false,
         rpe: null,
+        kind: SET_KIND.WORKING,
       }],
     };
   });
@@ -298,6 +423,351 @@ export async function removeSet(sessionId, exerciseId, setIndex) {
   return db.replaceById(COLLECTIONS.SESSIONS, sessionId, { entries });
 }
 
+/* --- Warm-up sets -------------------------------------------------------
+   Ramp-up work. Visible in history, excluded from progression, volume and
+   completion. Available on any exercise, whether or not the program prescribes
+   a ramp for it — the brief asks that the user be able to add one anywhere.
+   ====================================================================== */
+
+/** Read-modify-write one entry of a session. */
+async function patchEntry(sessionId, exerciseId, mutator) {
+  const session = getSessionById(sessionId);
+  if (!session) throw new Error('That session no longer exists.');
+
+  let touched = false;
+  const entries = session.entries.map((raw) => {
+    if (raw.exerciseId !== exerciseId) return raw;
+    touched = true;
+    // `normalizeEntry` preserves `setModel`, so adding a warm-up set to a legacy
+    // entry does not promote it to 'v2'. That is deliberate: the new warm-up row
+    // is classified, but the sets logged before the upgrade still are not, and
+    // claiming otherwise would retroactively invent a classification nobody
+    // made. Only `reclassifyLegacySets` promotes an entry, because only there
+    // has the user actually said what those sets were.
+    return mutator(normalizeEntry(raw));
+  });
+
+  if (!touched) throw new Error('That exercise is not part of this session.');
+  return db.replaceById(COLLECTIONS.SESSIONS, sessionId, { entries });
+}
+
+/** Add one warm-up row, carrying the previous row's load forward. */
+export async function addWarmupSet(sessionId, exerciseId) {
+  return patchEntry(sessionId, exerciseId, (entry) => {
+    const previous = entry.warmupSets[entry.warmupSets.length - 1];
+    return {
+      ...entry,
+      warmupSets: [...entry.warmupSets, {
+        weightKg: previous?.weightKg ?? null,
+        reps: previous?.reps ?? null,
+        completed: false,
+        kind: SET_KIND.WARMUP,
+      }],
+    };
+  });
+}
+
+export async function updateWarmupSet(sessionId, exerciseId, index, patch) {
+  return patchEntry(sessionId, exerciseId, (entry) => ({
+    ...entry,
+    warmupSets: entry.warmupSets.map((set, i) =>
+      (i === index ? { ...set, ...patch, kind: SET_KIND.WARMUP } : set)),
+  }));
+}
+
+export async function removeWarmupSet(sessionId, exerciseId, index) {
+  return patchEntry(sessionId, exerciseId, (entry) => ({
+    ...entry,
+    warmupSets: entry.warmupSets.filter((_, i) => i !== index),
+  }));
+}
+
+/**
+ * Fill the ramp rows from the entry's working weight.
+ *
+ * Offered as an explicit action rather than done silently on every load change:
+ * once the user has typed a ramp load, overwriting it because they nudged the
+ * working weight would be the app arguing with them.
+ */
+export async function suggestWarmup(sessionId, exerciseId) {
+  const exercise = programService.getExercise(exerciseId);
+  return patchEntry(sessionId, exerciseId, (entry) => {
+    const count = Math.max(
+      1,
+      entry.warmupSets.length || trainingPrefs.warmupSetCount(
+        exercise ? programService.rampSetCount(exercise) : 3
+      )
+    );
+    const top = entry.targetWeightKg
+      ?? entry.sets.find((set) => set.weightKg)?.weightKg
+      ?? null;
+    const rungs = buildRampSets(top, count, 2.5);
+    if (!rungs.length) return entry;
+
+    return {
+      ...entry,
+      warmupSets: rungs.map((rung, index) => ({
+        ...(entry.warmupSets[index] ?? {}),
+        weightKg: rung.weightKg,
+        reps: rung.reps,
+        completed: entry.warmupSets[index]?.completed ?? false,
+        kind: SET_KIND.WARMUP,
+      })),
+    };
+  });
+}
+
+/**
+ * Reclassify the sets of a legacy entry, by hand.
+ *
+ * The migration refuses to guess which of week one's rising-weight sets were
+ * ramps, because a ramp and a pyramid and working up to a top set all look
+ * identical in the data. This is how the user tells it — one decision per set,
+ * made deliberately, never inferred.
+ *
+ * @param {Array<'warmup'|'working'|'drop'>} kinds  one per existing set, in order
+ */
+export async function reclassifyLegacySets(sessionId, exerciseId, kinds) {
+  return patchEntry(sessionId, exerciseId, (entry) => {
+    const existing = workingSets(entry);
+    if (!existing.length) return entry;
+
+    const working = [];
+    const warmup = [...warmupSets(entry)];
+    const dropped = [];
+
+    existing.forEach((set, index) => {
+      const kind = kinds[index] ?? SET_KIND.WORKING;
+      if (kind === SET_KIND.WARMUP) {
+        warmup.push({ ...set, kind: SET_KIND.WARMUP });
+      } else if (kind === SET_KIND.DROP) {
+        dropped.push({ ...set, kind: SET_KIND.DROP, toFailure: false });
+      } else {
+        working.push({ ...set, kind: SET_KIND.WORKING });
+      }
+    });
+
+    const intensitySets = [...intensitySequences(entry)];
+    if (dropped.length) {
+      intensitySets.push({
+        id: db.newId(),
+        type: INTENSITY_TYPE.DROP,
+        note: 'Reclassified from an unclassified session',
+        stages: dropped,
+      });
+    }
+
+    return {
+      ...entry,
+      // Now classified, so it stops being reported as unclassified. The values
+      // themselves have not changed — only the label on each one.
+      setModel: 'v2',
+      sets: working,
+      warmupSets: warmup,
+      intensitySets,
+    };
+  });
+}
+
+/* --- Intensity techniques ----------------------------------------------
+   Drop sets and failure sets. Entirely optional, chosen session by session,
+   and structurally incapable of moving a prescribed weight: they live outside
+   `entry.sets`, which is the only array the progression engine ever sees.
+   ====================================================================== */
+
+/**
+ * Attach a drop-set sequence, seeded from the heaviest completed working set.
+ *
+ * The stages are a starting point only — what is on the rack decides a drop set
+ * more than arithmetic does — so every rung is editable and the reps start
+ * empty rather than pretending to know how many will come out.
+ */
+export async function addDropSet(sessionId, exerciseId, { stages = 3 } = {}) {
+  return patchEntry(sessionId, exerciseId, (entry) => {
+    const heaviest = completedWorkingSets(entry)
+      .reduce((top, set) => Math.max(top, set.weightKg ?? 0), 0);
+
+    const seeded = Array.from({ length: stages }, (_, index) => ({
+      weightKg: heaviest ? round2(heaviest * (1 - index * 0.2)) : null,
+      reps: null,
+      completed: false,
+      toFailure: index === 0,
+      kind: SET_KIND.DROP,
+    }));
+
+    return {
+      ...entry,
+      intensitySets: [...entry.intensitySets, {
+        id: db.newId(),
+        type: INTENSITY_TYPE.DROP,
+        note: '',
+        stages: seeded,
+      }],
+    };
+  });
+}
+
+/** Attach a single to-failure set. */
+export async function addFailureSet(sessionId, exerciseId) {
+  return patchEntry(sessionId, exerciseId, (entry) => {
+    const heaviest = completedWorkingSets(entry)
+      .reduce((top, set) => Math.max(top, set.weightKg ?? 0), 0);
+
+    return {
+      ...entry,
+      intensitySets: [...entry.intensitySets, {
+        id: db.newId(),
+        type: INTENSITY_TYPE.FAILURE,
+        note: '',
+        stages: [{
+          weightKg: heaviest || null,
+          reps: null,
+          completed: false,
+          toFailure: true,
+          kind: SET_KIND.FAILURE,
+        }],
+      }],
+    };
+  });
+}
+
+/** Add another rung to an existing drop-set sequence. */
+export async function addDropStage(sessionId, exerciseId, sequenceId) {
+  return patchEntry(sessionId, exerciseId, (entry) => ({
+    ...entry,
+    intensitySets: entry.intensitySets.map((sequence) => {
+      if (sequence.id !== sequenceId) return sequence;
+      const previous = sequence.stages[sequence.stages.length - 1];
+      return {
+        ...sequence,
+        stages: [...sequence.stages, {
+          weightKg: previous?.weightKg ? round2(previous.weightKg * 0.8) : null,
+          reps: null,
+          completed: false,
+          toFailure: false,
+          kind: SET_KIND.DROP,
+        }],
+      };
+    }),
+  }));
+}
+
+export async function updateIntensityStage(sessionId, exerciseId, sequenceId, stageIndex, patch) {
+  return patchEntry(sessionId, exerciseId, (entry) => ({
+    ...entry,
+    intensitySets: entry.intensitySets.map((sequence) => {
+      if (sequence.id !== sequenceId) return sequence;
+      return {
+        ...sequence,
+        stages: sequence.stages.map((stage, index) =>
+          (index === stageIndex ? { ...stage, ...patch } : stage)),
+      };
+    }),
+  }));
+}
+
+export async function updateIntensitySequence(sessionId, exerciseId, sequenceId, patch) {
+  return patchEntry(sessionId, exerciseId, (entry) => ({
+    ...entry,
+    intensitySets: entry.intensitySets.map((sequence) =>
+      (sequence.id === sequenceId ? { ...sequence, ...patch } : sequence)),
+  }));
+}
+
+export async function removeIntensitySequence(sessionId, exerciseId, sequenceId) {
+  return patchEntry(sessionId, exerciseId, (entry) => ({
+    ...entry,
+    intensitySets: entry.intensitySets.filter((sequence) => sequence.id !== sequenceId),
+  }));
+}
+
+export async function removeDropStage(sessionId, exerciseId, sequenceId, stageIndex) {
+  return patchEntry(sessionId, exerciseId, (entry) => ({
+    ...entry,
+    intensitySets: entry.intensitySets.map((sequence) => {
+      if (sequence.id !== sequenceId) return sequence;
+      if (sequence.stages.length <= 1) return sequence;
+      return { ...sequence, stages: sequence.stages.filter((_, i) => i !== stageIndex) };
+    }),
+  }));
+}
+
+/* --- Pain and discomfort -----------------------------------------------
+   Informational, never diagnostic. Logging pain changes what the engine is
+   willing to conclude from a session; it does not change the session.
+   ====================================================================== */
+
+/**
+ * Record discomfort on one exercise.
+ *
+ * @param {object} pain
+ * @param {number} [pain.score]           0-10, the user's own reading
+ * @param {string} [pain.location]        free text
+ * @param {string} [pain.note]            free text
+ * @param {string} [pain.action]          see PAIN_ACTION
+ * @param {string} [pain.alternativeId]   substitution the user chose, if any
+ */
+export async function setPain(sessionId, exerciseId, pain) {
+  return patchEntry(sessionId, exerciseId, (entry) => ({
+    ...entry,
+    pain: pain === null ? null : {
+      score: clampScore(pain.score),
+      location: String(pain.location ?? '').slice(0, 120),
+      note: String(pain.note ?? '').slice(0, 500),
+      action: Object.values(PAIN_ACTION).includes(pain.action)
+        ? pain.action
+        : PAIN_ACTION.COMPLETED,
+      alternativeId: pain.alternativeId ?? null,
+      loggedAt: new Date().toISOString(),
+    },
+  }));
+}
+
+export async function clearPain(sessionId, exerciseId) {
+  return patchEntry(sessionId, exerciseId, (entry) => ({ ...entry, pain: null }));
+}
+
+/** Record which difficulty rung a difficulty-first movement was worked at. */
+export async function setDifficulty(sessionId, exerciseId, difficulty) {
+  return patchEntry(sessionId, exerciseId, (entry) => ({
+    ...entry,
+    difficulty: difficulty || null,
+  }));
+}
+
+/** Every pain log in a session, for the summary and the report. */
+export function getPainLogs(session) {
+  return (session?.entries ?? [])
+    .filter((entry) => entry.pain)
+    .map((entry) => ({
+      exerciseId: entry.exerciseId,
+      exerciseName: programService.getExercise(entry.exerciseId)?.name ?? entry.exerciseId,
+      ...entry.pain,
+    }));
+}
+
+/** Pain logs across a date range, newest first — the report's pain section. */
+export function getPainLogsBetween(startKey, endKey) {
+  const out = [];
+  for (const session of getCompletedSessions()) {
+    if (session.date < startKey || session.date > endKey) continue;
+    for (const log of getPainLogs(session)) {
+      out.push({ date: session.date, sessionId: session.id, ...log });
+    }
+  }
+  return out;
+}
+
+function clampScore(value) {
+  const score = Number(value);
+  if (!Number.isFinite(score)) return 0;
+  return Math.min(10, Math.max(0, Math.round(score)));
+}
+
+function round2(value) {
+  return Math.round(Number(value) * 100) / 100;
+}
+
 /**
  * A summary of a finished session: what was done, what it earned, and which
  * lifts now advance. This is what the completion sheet shows, and what the
@@ -311,13 +781,36 @@ export function getSessionSummary(sessionId) {
   const completion = getSessionCompletion(session);
   const advancing = [];
   const held = [];
+  const painLimited = [];
+  let warmupSetCount = 0;
+  let dropSequences = 0;
+  let failureSets = 0;
 
-  for (const entry of session.entries) {
-    const exercise = programService.getExercise(entry.exerciseId);
+  for (const raw of session.entries) {
+    const exercise = programService.getExercise(raw.exerciseId);
     if (!exercise) continue;
+    const entry = normalizeEntry(raw);
 
-    const done = entry.sets.filter((set) => set.completed);
-    if (!done.length) continue;
+    const counts = composition(entry);
+    warmupSetCount += counts.warmupDone;
+    dropSequences += counts.dropSequences;
+    failureSets += counts.failureSets;
+
+    const done = workingSets(entry).filter((set) => set.completed);
+    if (!done.length) {
+      // Nothing prescribed was completed. If discomfort was logged that is the
+      // headline, not an omission — it belongs in the summary rather than
+      // vanishing from it.
+      if (isPainLimited(entry)) {
+        painLimited.push({
+          exerciseId: entry.exerciseId,
+          name: exercise.name,
+          sets: 0,
+          pain: entry.pain,
+        });
+      }
+      continue;
+    }
 
     const record = {
       exerciseId: entry.exerciseId,
@@ -325,65 +818,133 @@ export function getSessionSummary(sessionId) {
       sets: done.length,
       topWeightKg: Math.max(...done.map((set) => set.weightKg ?? 0)),
       reps: done.map((set) => set.reps ?? 0),
+      pain: entry.pain ?? null,
     };
 
-    if (earnedAdvance(exercise, entry.sets)) advancing.push(record);
+    // A pain-limited exercise is reported as its own outcome. Filing it under
+    // "held" would read as a stall, which is precisely the wrong conclusion.
+    if (isPainLimited(entry)) painLimited.push(record);
+    else if (earnedAdvance(exercise, workingSets(entry))) advancing.push(record);
     else held.push(record);
   }
+
+  const volume = getSessionVolumeBreakdown(session);
 
   return {
     session,
     dayLabel: day?.label ?? session.dayId,
     completion,
-    volumeKg: getSessionVolume(session),
+    volumeKg: volume.workingKg,
+    volume,
+    warmupSetCount,
+    dropSequences,
+    failureSets,
+    painLogs: getPainLogs(session),
     durationSeconds: session.durationSeconds,
-    exercisesDone: advancing.length + held.length,
+    exercisesDone: advancing.length + held.length + painLimited.length,
     advancing,
     held,
+    painLimited,
   };
 }
 
-/** Whether every entry in a session has all its sets ticked. */
+/**
+ * Whether every prescribed working set in a session has been ticked.
+ *
+ * Entries with no working sets are skipped rather than counted as incomplete:
+ * an optional pre-workout warm-up has nothing to tick, and letting it hold the
+ * session open forever would mean the finish button never lights up on chest
+ * day.
+ */
 export function isSessionComplete(session) {
-  return session.entries.length > 0 && session.entries.every(isEntryComplete);
+  const prescribed = session.entries.filter((entry) => workingSets(entry).length > 0);
+  return prescribed.length > 0 && prescribed.every(isEntryComplete);
 }
 
 /* --- Derived statistics ------------------------------------------------- */
 
 /**
- * How much of a session was completed, as sets done over sets prescribed.
- * @returns {{done: number, total: number, percent: number}}
+ * How much of a session was completed, as **working** sets done over working
+ * sets prescribed.
+ *
+ * Warm-up rows and intensity work are excluded from both sides. Ticking three
+ * ramp sets must not read as 30% of the session done, and adding a drop set
+ * must not push a finished session below 100%.
  */
 export function getSessionCompletion(session) {
   let done = 0;
   let total = 0;
   for (const entry of session.entries) {
-    total += entry.sets.length;
-    done += entry.sets.filter((set) => set.completed).length;
+    const sets = workingSets(entry);
+    total += sets.length;
+    done += sets.filter((set) => set.completed).length;
   }
   return { done, total, percent: total ? Math.round((done / total) * 100) : 0 };
 }
 
 /**
- * Total load moved in a session, in kg-reps.
+ * Working-set volume for a session, in kg-reps.
  *
- * Dumbbell work is logged per hand, so its volume is doubled — otherwise a
- * 30 kg dumbbell press would appear to be half the work of a 60 kg barbell
- * press at the same reps. Bodyweight movements count only the *added* load,
- * because body weight is tracked separately and would otherwise swamp the
- * trend every time the user gained a kilo.
+ * This is the headline volume figure everywhere in the app, and it counts
+ * working sets only. Ramp-up and intensity work are reported separately by
+ * `getSessionVolumeBreakdown` — see `engine/set-model.js` for why they are never
+ * summed into one number.
+ *
+ * Every loading convention now counts its stored load once. An earlier build
+ * doubled dumbbell volume on the assumption that the logged figure was per
+ * hand; under the convention actually used — both dumbbells summed — that
+ * counted every dumbbell set twice. Bodyweight movements still count only the
+ * *added* load, because body weight is tracked separately and would otherwise
+ * swamp the trend every time the user gained a kilo.
  */
 export function getSessionVolume(session) {
-  let volume = 0;
-  for (const entry of session.entries) {
-    const exercise = programService.getExercise(entry.exerciseId);
-    const multiplier = exercise?.loadType === 'per-hand' ? 2 : 1;
-    for (const set of entry.sets) {
-      if (!set.completed || !set.reps) continue;
-      volume += (set.weightKg ?? 0) * set.reps * multiplier;
+  return getSessionVolumeBreakdown(session).workingKg;
+}
+
+/**
+ * Volume split by the kind of work that produced it.
+ * @returns {{workingKg: number, warmupKg: number, intensityKg: number}}
+ */
+export function getSessionVolumeBreakdown(session) {
+  const total = { workingKg: 0, warmupKg: 0, intensityKg: 0 };
+  const countWarmupMovements = trainingPrefs.getPrefs().pushupsCountAsVolume === true;
+
+  for (const raw of session.entries ?? []) {
+    const exercise = programService.getExercise(raw.exerciseId);
+    const entry = normalizeEntry(raw);
+    const part = entryVolume(entry, volumeMultiplier(exercise));
+
+    // A pre-workout warm-up movement is logged as reps, not as load. By default
+    // it contributes to neither figure: pushing bodyweight push-ups into chest
+    // volume is exactly what the preference forbids. Turning the preference on
+    // folds them into working volume, which is what "counts as working volume"
+    // has to mean if it is to mean anything.
+    if (programService.isWarmupOnly(exercise)) {
+      if (countWarmupMovements) total.workingKg += part.workingKg + part.warmupKg;
+      continue;
     }
+
+    total.workingKg += part.workingKg;
+    total.warmupKg += part.warmupKg;
+    total.intensityKg += part.intensityKg;
   }
-  return volume;
+
+  return total;
+}
+
+/** Set counts for a session, split by kind — the report's set-type table. */
+export function getSessionSetCounts(session) {
+  const counts = {
+    working: 0, workingDone: 0, legacy: 0, legacyDone: 0,
+    warmup: 0, warmupDone: 0, dropSequences: 0, dropStages: 0, failureSets: 0,
+  };
+
+  for (const entry of session.entries ?? []) {
+    const part = composition(normalizeEntry(entry));
+    for (const key of Object.keys(counts)) counts[key] += part[key] ?? 0;
+  }
+
+  return counts;
 }
 
 /**

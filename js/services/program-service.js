@@ -108,9 +108,82 @@ export function getAllExercises() {
   return [...exerciseIndex.values()].map(({ exercise }) => exercise);
 }
 
-/** Total working sets prescribed for a day. */
+/**
+ * Total **working** sets prescribed for a day.
+ *
+ * Pre-workout warm-up movements are excluded. The push-ups before a chest
+ * session are real work but they are not chest working sets, and counting them
+ * would inflate every set total, every completion percentage and every volume
+ * figure that quotes one.
+ */
 export function countSets(day) {
-  return (day?.exercises ?? []).reduce((sum, exercise) => sum + exercise.sets, 0);
+  return (day?.exercises ?? [])
+    .filter((exercise) => !isWarmupOnly(exercise))
+    .reduce((sum, exercise) => sum + (exercise.sets ?? 0), 0);
+}
+
+/** Exercises that count towards the prescription. */
+export function getWorkingExercises(day) {
+  return (day?.exercises ?? []).filter((exercise) => !isWarmupOnly(exercise));
+}
+
+/** Optional pre-workout warm-up movements, in order. */
+export function getWarmupExercises(day) {
+  return (day?.exercises ?? []).filter(isWarmupOnly);
+}
+
+/**
+ * A movement that exists only as a warm-up: it has no working sets, never
+ * drives progression, and contributes no hypertrophy volume.
+ */
+export function isWarmupOnly(exercise) {
+  return Boolean(exercise?.warmupOnly) || exercise?.role === 'pre-workout-warmup';
+}
+
+/** Does the program prescribe ramp-up sets for this movement? */
+export function supportsRamp(exercise) {
+  return Boolean(exercise?.warmup?.supported);
+}
+
+/** How many ramp-up sets the program suggests, before the user's preference. */
+export function rampSetCount(exercise) {
+  return Number(exercise?.warmup?.rampSets) || 3;
+}
+
+/**
+ * Whether drop sets and failure work are offered on this movement.
+ *
+ * Defaults follow the program's `intensity.defaultAllowedFor`: isolation and
+ * core work yes, main compounds no. An explicit flag on the exercise wins. This
+ * is a default, not a prohibition — the brief is explicit that failure training
+ * is the user's choice, so the UI still offers an override.
+ */
+export function allowsIntensityTechniques(exercise) {
+  if (typeof exercise?.intensityTechniquesAllowed === 'boolean') {
+    return exercise.intensityTechniquesAllowed;
+  }
+  const allowed = getProgram().progression?.intensity?.defaultAllowedFor ?? ['isolation', 'core'];
+  return allowed.includes(exercise?.category);
+}
+
+/** Pain-aware movements accept fewer reps, an early stop or a substitution. */
+export function isPainAware(exercise) {
+  return Boolean(exercise?.painAware);
+}
+
+/** Substitutions offered when a movement is stopped for discomfort. */
+export function getAlternatives(exercise) {
+  return Array.isArray(exercise?.alternatives) ? exercise.alternatives : [];
+}
+
+/** Program-wide intensity-technique guidance, for display. */
+export function getIntensityRules() {
+  return getProgram().progression?.intensity ?? null;
+}
+
+/** Program-wide warm-up guidance, for display. */
+export function getWarmupRules() {
+  return getProgram().progression?.warmup ?? null;
 }
 
 /** Program-wide progression rules, for display and for the engine. */

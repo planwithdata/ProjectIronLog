@@ -15,10 +15,41 @@ import { go, refresh } from '../core/router.js';
 import { toast } from '../core/events.js';
 import { formatDate, relativeDay, today, trimNumber, pluralize } from '../core/format.js';
 import { recovery, measurements, RECOVERY_FIELDS, MEASUREMENT_FIELDS } from '../services/logs-service.js';
+import * as bodyService from '../services/body-service.js';
+import { COMPOSITION_FIELDS } from '../services/body-service.js';
 import { sectionHead, stat, emptyState } from '../../components/stat.js';
 import { confirmSheet } from '../../components/sheet.js';
+import { openWeightSheet } from '../../components/weight-entry.js';
+
+/**
+ * Body weight and scale readings, adapted to the same interface the recovery and
+ * measurement logs use.
+ *
+ * `body-service` has always been able to store these; until now nothing called
+ * it, so the weight series could only be filled by restoring a backup. Weight
+ * itself also has a two-tap sheet (see components/weight-entry.js) because it is
+ * logged every morning; this tab is for the full ten-metric scale reading and
+ * for correcting history.
+ */
+const bodyLog = {
+  all: () => bodyService.getCompositionEntries(),
+  latest: () => bodyService.getLatestComposition(),
+  log: (payload, dayKey, note) => bodyService.logComposition({ ...payload, note }, dayKey),
+  remove: (id) => bodyService.deleteComposition(id),
+};
 
 const TABS = {
+  body: {
+    label: 'Body',
+    service: bodyLog,
+    fields: COMPOSITION_FIELDS,
+    blurb: 'Weigh in first thing, after the bathroom and before eating. Weight alone is enough — the other nine come from a smart scale if you have one.',
+    emptyText: 'Log weight most mornings. Daily readings swing a kilo on water alone, which is why the app reads the 7-day average and not any single number.',
+    icon: 'scale',
+    // Weight is the one field that matters daily, so the tab offers the same
+    // quick sheet the morning reminder uses rather than making it a form field.
+    quickAction: 'Log weight only',
+  },
   recovery: {
     label: 'Recovery',
     service: recovery,
@@ -35,7 +66,7 @@ const TABS = {
   },
 };
 
-let activeTab = 'recovery';
+let activeTab = 'body';
 
 export function render(params = {}) {
   const requested = params.tab ?? params[0];
@@ -123,6 +154,13 @@ function entryForm(tab) {
   const form = el('form.card.stack', { style: { gap: 'var(--s-3)' } }, [
     el('div.row.row--between', {}, [
       el('div.t-overline', { text: `New ${tab.label.toLowerCase()} entry` }),
+      tab.quickAction
+        ? el('button.btn.btn--sm.btn--tinted', {
+            type: 'button',
+            text: tab.quickAction,
+            on: { click: async () => { if (await openWeightSheet()) refresh(); } },
+          })
+        : null,
       previous
         ? el('button.btn.btn--sm.btn--ghost', {
             type: 'button',
@@ -205,7 +243,7 @@ function historySection(tab) {
   if (!entries.length) {
     return el('div.card.card--quiet', {}, [
       emptyState({
-        iconName: activeTab === 'recovery' ? 'bed' : 'ruler',
+        iconName: tab.icon ?? (activeTab === 'recovery' ? 'bed' : 'ruler'),
         title: `No ${tab.label.toLowerCase()} logged yet`,
         text: tab.emptyText,
       }),

@@ -25,5 +25,11 @@ tools/exercise-image-map.json
 reports/*
 !reports/.gitkeep
 
+# Real training data. `tools/test-migration.mjs` uses a backup from this
+# directory as a fixture when one is present, and skips that test when it is
+# not — so the file stays local and never lands in a commit.
+ironlog-backup-*.json
+pre-upgrade-*.json
+
 # There is no build step and no dependencies — node_modules should never exist.
 node_modules/

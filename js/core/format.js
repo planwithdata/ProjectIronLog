@@ -147,6 +147,47 @@ export function formatWeight(value, unit = 'kg') {
   return `${trimNumber(value)} ${unit}`;
 }
 
+/**
+ * Render a load descriptor from `engine/loading.describeLoad`.
+ *
+ *   "+40 kg plates"      barbell — the plates, which is what gets logged
+ *   "27.5 kg / hand"     dumbbells — half of the logged total of both
+ *   "8 kg per side"      a two-stack cable movement, value as read
+ *   "63 kg"              a single machine stack, value as read
+ *   "Bodyweight"         no added load
+ *   "+5 kg"              bodyweight plus a belt
+ *
+ * Takes a descriptor rather than an exercise so that `format.js` stays free of
+ * training concepts: it converts numbers and assembles words, and the meaning
+ * arrives already decided.
+ */
+export function formatLoad(descriptor, unit = 'kg') {
+  if (!descriptor) return '—';
+  if (descriptor.displayKg === null || descriptor.displayKg === undefined) {
+    return descriptor.bodyweight ? 'Bodyweight' : '—';
+  }
+
+  const value = trimNumber(displayWeight(descriptor.displayKg, unit), 2);
+  const body = `${descriptor.prefix ?? ''}${value} ${unit}`;
+  return descriptor.qualifier ? `${body} ${descriptor.qualifier}` : body;
+}
+
+/**
+ * The supporting figure, when a descriptor carries one: the dumbbell total
+ * behind a per-hand reading, or the estimated bar-plus-plates behind a plate
+ * count. Returns null when there is nothing honest to add.
+ */
+export function formatLoadSecondary(descriptor, unit = 'kg') {
+  if (!descriptor || descriptor.secondaryKg === null || descriptor.secondaryKg === undefined) {
+    return null;
+  }
+  const value = `${trimNumber(displayWeight(descriptor.secondaryKg, unit), 2)} ${unit}`;
+  const qualifier = descriptor.secondaryQualifier ?? '';
+  if (!qualifier) return value;
+  // "est. total 60 kg" reads correctly; "60 kg est. total" does not.
+  return qualifier.startsWith('est.') ? `${qualifier} ${value}` : `${value} ${qualifier}`;
+}
+
 /** Round to the nearest step — used when suggesting the next load. */
 export function roundToStep(value, step) {
   if (!step || step <= 0) return value;

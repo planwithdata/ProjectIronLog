@@ -19,9 +19,20 @@
 
 import { storage } from './storage-adapter.js';
 import { EVENTS, emit } from '../core/events.js';
+import { SET_KIND } from '../engine/set-model.js';
 
 /** Current schema version. Bump when a migration is added below. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
+
+/**
+ * Reserved storage key holding a verbatim copy of the database as it was
+ * immediately before the first schema upgrade ran on this device.
+ *
+ * Not a collection: it is deliberately outside `COLLECTIONS` so it is never
+ * exported, never imported, and never migrated — it is a parachute, and a
+ * parachute that gets repacked by the thing it protects against is not one.
+ */
+export const PRE_MIGRATION_KEY = '__premigration';
 
 /**
  * Every collection the app persists, with its default value.
@@ -40,6 +51,7 @@ export const COLLECTIONS = {
   RECOVERY:     'recovery',       // sleep / soreness / energy logs
   PERSONAL_RECORDS: 'personalRecords', // derived PR cache, keyed by exercise
   REVIEWS:      'reviews',        // generated two-week reviews
+  TRAINING:     'trainingPrefs',  // how this user trains — see engine/set-model.js
 };
 
 const DEFAULTS = {
@@ -47,6 +59,12 @@ const DEFAULTS = {
     schemaVersion: SCHEMA_VERSION,
     createdAt: new Date().toISOString(),
     lastOpenedAt: null,
+    /** Set by markBackupTaken(); surfaced in Settings as "Last backup". */
+    lastBackupAt: null,
+    /** When the v1 parachute was written, or null if there was never a v1. */
+    preMigrationBackupAt: null,
+    /** Guards the morning weigh-in prompt to once per calendar day. */
+    lastMorningPromptDate: null,
   }),
   [COLLECTIONS.SETTINGS]: () => ({
     theme: 'dark',            // 'dark' | 'light' | 'system'
@@ -72,7 +90,46 @@ const DEFAULTS = {
   [COLLECTIONS.RECOVERY]:          () => [],
   [COLLECTIONS.PERSONAL_RECORDS]:  () => ({}),
   [COLLECTIONS.REVIEWS]:           () => [],
+  [COLLECTIONS.TRAINING]:          () => defaultTrainingPrefs(),
 };
+
+/**
+ * Training Preferences — how this user actually trains.
+ *
+ * These are *conventions, not corrections*. They are stored rather than
+ * hardcoded so a future change of habit is a toggle rather than a patch, and
+ * so the app can never quietly decide it knows better.
+ */
+export function defaultTrainingPrefs() {
+  return {
+    /* Reminders */
+    morningWeightReminder: true,
+
+    /* Set model */
+    separateWarmupSets: true,
+    separateWorkingSets: true,
+    defaultWarmupSets: 3,
+
+    /* Intensity techniques */
+    dropSetsAllowed: true,
+    failureTechniques: 'optional',      // 'optional' | 'off'
+    dropSetsAffectProgression: false,   // must stay false for the engine to be honest
+
+    /* Chest day */
+    pushupsBeforeChest: true,
+    pushupsCountAsVolume: false,
+
+    /* Exercise-specific handling */
+    pullUpMode: 'pain-aware',           // 'pain-aware' | 'standard'
+    abWheelProgression: 'difficulty',   // 'difficulty' | 'load'
+
+    /* Load display conventions — see engine/loading.js */
+    dumbbellDisplay: 'per-hand',        // stored total of both, shown per hand
+    barbellDisplay: 'plates',           // stored plates only, bar excluded
+    machineLoadHandling: 'raw',         // never normalised between machines
+    dumbbellIncrementBasis: 'per-hand', // +2.5 kg/hand = +5 kg of stored total
+  };
+}
 
 const ALL = Object.values(COLLECTIONS);
 
@@ -85,14 +142,88 @@ let ready = false;
  * to version `n + 1` and receives a plain `{ collection: value }` snapshot,
  * which it mutates in place.
  *
- * Version 1 is the initial schema, so there is nothing to migrate yet. The
- * runner exists from day one because retrofitting one onto data that is
- * already on a phone is how personal apps lose their history.
+ * The runner existed from day one because retrofitting one onto data that is
+ * already on a phone is how personal apps lose their history. This is the
+ * migration it was built for.
  */
 const MIGRATIONS = [
   // index 0: v0 -> v1 (fresh install; nothing to do)
   (snapshot) => snapshot,
+  // index 1: v1 -> v2 (warm-up / working / intensity set model)
+  migrateV1ToV2,
 ];
+
+/**
+ * v1 -> v2: separate warm-up, working and intensity work.
+ *
+ * **Strictly additive.** Not one weight, rep count, completion flag, RPE, date,
+ * note or ordering is altered. Every existing set stays exactly where it is, in
+ * `entry.sets`, and is tagged `kind: 'legacy'`; the entry is marked
+ * `setModel: 'legacy'`.
+ *
+ * Why nothing is reclassified
+ * ---------------------------
+ * The real week-one data is, on almost every exercise, a rising-weight
+ * falling-rep ladder — 150x12, 180x10, 200x8, 220x6 on the squat. That *looks*
+ * like three ramp sets and a working set. It also looks exactly like a pyramid,
+ * or like working up to a top single. The app cannot tell which, and the
+ * difference decides what the progression engine does next.
+ *
+ * So it does not guess. Legacy sets keep feeding progression, because they are
+ * the only record of what was lifted and throwing them away would be worse than
+ * a coarse reading of them. They are labelled "unclassified" everywhere they
+ * surface, and History offers a manual per-set reclassification control for
+ * whenever the user wants to tell the app what those sets actually were.
+ */
+function migrateV1ToV2(snapshot) {
+  const sessions = snapshot[COLLECTIONS.SESSIONS];
+  if (Array.isArray(sessions)) {
+    snapshot[COLLECTIONS.SESSIONS] = sessions.map(upgradeSessionToV2);
+  }
+
+  // A v1 database has no trainingPrefs key at all. `init()` has already put the
+  // defaults in the cache; make sure an empty or partial object still ends up
+  // complete rather than missing keys the UI reads.
+  snapshot[COLLECTIONS.TRAINING] = {
+    ...defaultTrainingPrefs(),
+    ...(isPlainObject(snapshot[COLLECTIONS.TRAINING]) ? snapshot[COLLECTIONS.TRAINING] : {}),
+  };
+
+  return snapshot;
+}
+
+function upgradeSessionToV2(session) {
+  if (!session || !Array.isArray(session.entries)) return session;
+  return { ...session, entries: session.entries.map(upgradeEntryToV2) };
+}
+
+function upgradeEntryToV2(entry) {
+  if (!entry || typeof entry !== 'object') return entry;
+
+  // Idempotent. Re-running the migration — or importing a backup that has
+  // already been through it — must be a no-op, not a second pass that relabels
+  // classified sets as legacy.
+  if (entry.setModel === 'v2' || entry.setModel === 'legacy') return entry;
+
+  const sets = Array.isArray(entry.sets) ? entry.sets : [];
+
+  return {
+    ...entry,
+    setModel: 'legacy',
+    sets: sets.map((set) =>
+      (set && typeof set === 'object' && set.kind)
+        ? set
+        : { ...set, kind: SET_KIND.LEGACY }),
+    warmupSets: Array.isArray(entry.warmupSets) ? entry.warmupSets : [],
+    intensitySets: Array.isArray(entry.intensitySets) ? entry.intensitySets : [],
+    pain: entry.pain ?? null,
+    difficulty: entry.difficulty ?? null,
+  };
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
 
 /* --- Lifecycle ---------------------------------------------------------- */
 
@@ -100,12 +231,24 @@ const MIGRATIONS = [
 export async function init() {
   if (ready) return;
 
+  let metaWasStored = false;
+
   await Promise.all(
     ALL.map(async (collection) => {
       const stored = await storage.get(collection);
+      if (collection === COLLECTIONS.META) metaWasStored = stored !== null && stored !== undefined;
       cache.set(collection, stored ?? DEFAULTS[collection]());
     })
   );
+
+  // Safety net for a database with data but no meta key: the default meta
+  // claims the current schema version, which would skip every migration and
+  // leave real sessions unclassified forever. Anything holding sessions without
+  // a meta record can only have come from v1.
+  if (!metaWasStored && (cache.get(COLLECTIONS.SESSIONS) ?? []).length > 0) {
+    console.warn('[db] sessions present with no meta record; treating as schema v1.');
+    cache.get(COLLECTIONS.META).schemaVersion = 1;
+  }
 
   await runMigrations();
 
@@ -134,6 +277,12 @@ async function runMigrations() {
     return;
   }
 
+  // Parachute first, and only for a database that actually holds something. A
+  // fresh install at v0 has nothing to lose; anything at v1 or above does.
+  if (from >= 1 && from < SCHEMA_VERSION) {
+    await writePreMigrationSnapshot(from);
+  }
+
   while (from < SCHEMA_VERSION) {
     const migrate = MIGRATIONS[from];
     if (typeof migrate === 'function') {
@@ -153,6 +302,65 @@ async function runMigrations() {
     meta.schemaVersion = SCHEMA_VERSION;
     await persistAll();
   }
+}
+
+/**
+ * Copy the database verbatim to the reserved parachute key, once, before the
+ * first schema upgrade touches it.
+ *
+ * Never overwritten: the first snapshot is the only one that captures the
+ * pre-upgrade state, so a later run must not replace it with data that has
+ * already been migrated.
+ *
+ * A failure here does not stop the migration. The v1 -> v2 upgrade is additive
+ * and idempotent, so refusing to start the app over a missing parachute would
+ * trade a small risk for a certain outage. It is recorded instead, and Settings
+ * says so.
+ */
+async function writePreMigrationSnapshot(fromVersion) {
+  const meta = cache.get(COLLECTIONS.META);
+
+  try {
+    const existing = await storage.get(PRE_MIGRATION_KEY);
+    if (existing) {
+      console.info('[db] pre-migration snapshot already present; keeping the original.');
+      return;
+    }
+
+    await storage.set(PRE_MIGRATION_KEY, {
+      app: 'Project IronLog',
+      kind: 'pre-migration snapshot',
+      schemaVersion: fromVersion,
+      capturedAt: new Date().toISOString(),
+      data: Object.fromEntries(ALL.map((collection) => [collection, cache.get(collection)])),
+    });
+
+    meta.preMigrationBackupAt = new Date().toISOString();
+    console.info(`[db] wrote a pre-migration snapshot of schema v${fromVersion}.`);
+  } catch (error) {
+    console.error('[db] could not write the pre-migration snapshot:', error);
+    meta.preMigrationBackupFailed = true;
+  }
+}
+
+/** The parachute, for the Settings download row. Null when there is none. */
+export async function getPreMigrationSnapshot() {
+  try {
+    return await storage.get(PRE_MIGRATION_KEY);
+  } catch (error) {
+    console.error('[db] could not read the pre-migration snapshot:', error);
+    return null;
+  }
+}
+
+/**
+ * Discard the parachute. Offered in Settings only once a fresh backup has been
+ * taken, and never called automatically — reclaiming a few kilobytes is not
+ * worth deciding on the user's behalf that the old copy is no longer wanted.
+ */
+export async function clearPreMigrationSnapshot() {
+  await storage.remove(PRE_MIGRATION_KEY);
+  await update(COLLECTIONS.META, (meta) => ({ ...meta, preMigrationBackupAt: null }));
 }
 
 /* --- Reads and writes -------------------------------------------------- */
@@ -242,6 +450,24 @@ export function exportAll() {
     exportedAt: new Date().toISOString(),
     data: Object.fromEntries(ALL.map((collection) => [collection, cache.get(collection)])),
   };
+}
+
+/**
+ * Record that a backup was successfully taken.
+ *
+ * Called by the caller that actually delivered the file, not by `exportAll()`:
+ * building the JSON is not the same as it reaching the user's disk, and a
+ * "Last backup" date for a download that failed would be a lie in the one place
+ * the user has to be able to trust.
+ */
+export async function markBackupTaken(at = new Date().toISOString()) {
+  await update(COLLECTIONS.META, (meta) => ({ ...meta, lastBackupAt: at }));
+  return at;
+}
+
+/** When the last backup was taken, or null. */
+export function getLastBackupAt() {
+  return read(COLLECTIONS.META).lastBackupAt ?? null;
 }
 
 /**

@@ -11,11 +11,13 @@
    [index] [weight group] [reps group] [rpe?] [check]
    ====================================================================== */
 
-/* Five columns: index, weight, reps, RPE, commit. The RPE column collapses to
-   zero width when the select is absent, so the same grid serves both cases. */
+/* Six columns: index, weight, reps, RPE, flag, commit. The RPE and flag columns
+   collapse to zero width when their controls are absent, so the same grid serves
+   a plain working set, a set with an RPE select, and a drop stage carrying a
+   "reached failure" toggle. */
 .set-row {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1fr) auto auto;
+  grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: var(--s-2);
   padding: var(--s-2) 0;
@@ -153,15 +155,17 @@
 /* Narrow phones: drop the RPE column into its own line rather than crushing
    the weight and rep fields below a usable width. */
 @media (max-width: 380px) {
-  .set-row { grid-template-columns: 26px minmax(0, 1fr) minmax(0, 1fr) auto; gap: var(--s-1); }
+  .set-row { grid-template-columns: 26px minmax(0, 1fr) minmax(0, 1fr) auto auto; gap: var(--s-1); }
   .set-row__group { grid-template-columns: 30px minmax(0, 1fr) 30px; }
   .set-row__rpe { display: none; }
 }
 
 /* The RPE select is a nicety; below ~430px the weight and rep fields need the
-   room more than it does. */
+   room more than it does. The trailing `auto` is the optional failure flag,
+   which collapses when absent — dropping it here would push the commit button
+   off the row on a drop stage. */
 @media (max-width: 430px) {
-  .set-row { grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .set-row { grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) auto auto; }
   .set-row__rpe { display: none; }
 }
 
@@ -484,3 +488,210 @@
 .set-chip__weight { font-weight: var(--w-semibold); }
 .set-chip__reps { color: var(--c-text-2); }
 .set-chip--top .set-chip__reps { color: inherit; opacity: 0.85; }
+
+/* --- Set kinds ----------------------------------------------------------
+   Warm-up, working and intensity sets are visually distinct because they are
+   genuinely different things: only the middle one moves a prescribed weight.
+   The hierarchy is deliberate — working sets read as the main event, ramp and
+   intensity work as what sits either side of it.
+   ====================================================================== */
+
+/* Reps-only movements — push-ups, where no weight is logged. The attribute
+   selector outranks the responsive `.set-row` rules above on specificity, which
+   is deliberate: this row has one fewer control at every width. */
+.set-row[data-variant="reps-only"] {
+  grid-template-columns: 30px minmax(0, 1fr) auto auto;
+}
+
+/* Captioned rows are wrapped, so the hairline moves to the wrapper. */
+.set-row-group + .set-row-group,
+.set-row-group + .set-row,
+.set-row + .set-row-group { border-top: 1px solid var(--c-hairline); }
+
+.set-row__captions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  padding: 0 44px 6px 38px;
+}
+
+.set-row__caption {
+  font-size: var(--t-micro);
+  color: var(--c-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.set-group { margin-top: var(--s-3); }
+
+.set-group__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) 0 var(--s-1);
+}
+
+.set-group__label {
+  flex: 0 0 auto;
+  font-size: var(--t-micro);
+  font-weight: var(--w-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-text-3);
+}
+
+.set-group__rule {
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--c-hairline);
+}
+
+.set-group--warmup .set-group__label { color: var(--c-text-3); }
+.set-group--working .set-group__label { color: var(--c-text-2); }
+.set-group--intensity .set-group__label { color: var(--c-warning); }
+
+/* Ramp sets sit back: they are rehearsal, not the set that counts. */
+.set-group--warmup .set-row__index { color: var(--c-text-3); }
+.set-row--warmup .set-row__field { background: var(--c-surface-2); }
+
+
+
+.set-row__flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 34px;
+  padding: 0 var(--s-2);
+  border: 1px solid var(--c-hairline-firm);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-text-3);
+  font-size: var(--t-micro);
+  font-weight: var(--w-semibold);
+}
+
+.set-row__flag[aria-pressed="true"] {
+  background: var(--c-warning-dim);
+  border-color: transparent;
+  color: var(--c-warning);
+}
+
+/* Padding kept modest: every pixel of horizontal padding here comes straight
+   out of the width of the weight field inside, and a stage row has the same
+   controls to fit as a working set does. */
+.intensity {
+  margin-top: var(--s-3);
+  padding: var(--s-2);
+  border: 1px dashed var(--c-hairline-firm);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+}
+
+.intensity + .intensity { margin-top: var(--s-2); }
+.intensity__stages { margin-top: var(--s-1); }
+
+.btn-icon--sm { width: 32px; height: 32px; min-width: 32px; min-height: 32px; }
+.btn-icon--sm svg { width: 16px; height: 16px; }
+
+/* --- Last session vs today ---------------------------------------------
+   Two columns, equal weight, because the comparison *is* the information.
+   ====================================================================== */
+
+.plan-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+  padding: var(--s-3);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+}
+
+.plan-compare__label {
+  font-size: var(--t-micro);
+  font-weight: var(--w-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-text-3);
+}
+
+.plan-compare__value {
+  margin-top: 3px;
+  font-size: var(--t-callout);
+  font-weight: var(--w-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-compare__meta {
+  margin-top: 2px;
+  font-size: var(--t-caption);
+  color: var(--c-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-compare__col + .plan-compare__col {
+  padding-left: var(--s-3);
+  border-left: 1px solid var(--c-hairline);
+}
+
+/* --- Pain and discomfort -----------------------------------------------
+   Informational, never diagnostic. Styled as a note rather than an alert:
+   logging discomfort is sensible behaviour, not an error state.
+   ====================================================================== */
+
+.pain-panel {
+  margin-top: var(--s-3);
+  padding: var(--s-3);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-hairline);
+}
+
+.pain-panel--logged { border-color: var(--c-warning); }
+
+.pain-panel__scale {
+  display: flex;
+  gap: 4px;
+  margin-top: var(--s-2);
+  flex-wrap: wrap;
+}
+
+.pain-panel__dot {
+  flex: 1 1 auto;
+  min-width: 28px;
+  min-height: 36px;
+  border: 1px solid var(--c-hairline-firm);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-text-2);
+  font-size: var(--t-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.pain-panel__dot[aria-pressed="true"] {
+  background: var(--c-warning-dim);
+  border-color: var(--c-warning);
+  color: var(--c-warning);
+  font-weight: var(--w-semibold);
+}
+
+.pain-panel__guidance {
+  margin-top: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-sm);
+  background: var(--c-warning-dim);
+  color: var(--c-text);
+  font-size: var(--t-caption);
+  line-height: 1.45;
+}
+
+@media (max-width: 380px) {
+  .intensity { padding: var(--s-1); }
+  .plan-compare { grid-template-columns: 1fr; }
+  .plan-compare__col + .plan-compare__col {
+    padding-left: 0;
+    border-left: 0;
+    padding-top: var(--s-3);
+    border-top: 1px solid var(--c-hairline);
+  }
+  .set-row__captions { padding-right: 40px; }
+}

@@ -36,6 +36,8 @@ export function gather(days = 14, endKey = today()) {
     adherence: adherenceBundle(startKey, endKey, days),
     strength: strengthBundle(startKey, endKey, priorStart, priorEnd),
     volume: volumeBundle(startKey, endKey, priorStart, priorEnd),
+    setTypes: setTypeBundle(startKey, endKey),
+    pain: painBundle(startKey, endKey),
     records: { records: recordsIn(startKey, endKey).length },
     recovery: recoveryBundle(startKey, endKey),
   };
@@ -172,11 +174,25 @@ function strengthBundle(startKey, endKey, priorStart, priorEnd) {
   let regressed = 0;
   const advancing = [];
   const stalled = [];
+  const painExcluded = [];
 
   for (const exercise of programService.getAllExercises()) {
-    const history = sessionService
+    // A warm-up-only movement has no working sets and therefore no strength
+    // trend to report.
+    if (programService.isWarmupOnly(exercise)) continue;
+
+    const all = sessionService
       .getExerciseHistory(exercise.id, Infinity)
       .filter((performance) => !performance.isDeload);
+
+    // Pain-limited sessions are held out of the comparison rather than counted
+    // as a regression. A session cut short because an elbow hurt is not
+    // evidence of lost strength, and reporting it as such would push the
+    // recommendation ladder toward "add calories" for no reason.
+    const history = all.filter((performance) => !performance.painLimited);
+    const excludedInPeriod = all.some((performance) =>
+      performance.painLimited && performance.date >= startKey && performance.date <= endKey);
+    if (excludedInPeriod) painExcluded.push(exercise.name);
 
     const best = (from, to) => {
       let top = 0;
@@ -207,9 +223,18 @@ function strengthBundle(startKey, endKey, priorStart, priorEnd) {
     tracked: improved + held + regressed,
     advancing,
     stalled,
+    painExcluded,
   };
 }
 
+/**
+ * Working-set volume for the period against the one before it.
+ *
+ * Working sets only, on both sides. Warm-up and intensity volume are reported by
+ * `setTypeBundle` and are deliberately not folded in here: a period-on-period
+ * comparison that mixes them cannot distinguish "I trained harder" from "I added
+ * a ramp set to the squat".
+ */
 function volumeBundle(startKey, endKey, priorStart, priorEnd) {
   const sum = (from, to) => sessionsIn(from, to)
     .reduce((total, session) => total + sessionService.getSessionVolume(session), 0);
@@ -218,6 +243,80 @@ function volumeBundle(startKey, endKey, priorStart, priorEnd) {
   const previousKg = sum(priorStart, priorEnd);
 
   return { currentKg, previousKg: previousKg || null };
+}
+
+/**
+ * The period's work, split by the kind of set that produced it.
+ *
+ * Counts drop-set *sequences* rather than stages, so a three-rung drop set
+ * reports as one piece of intensity work and not as three extra sets.
+ */
+function setTypeBundle(startKey, endKey) {
+  const totals = {
+    workingSets: 0,
+    warmupSets: 0,
+    dropSequences: 0,
+    failureSets: 0,
+    unclassifiedSets: 0,
+    workingVolumeKg: 0,
+    warmupVolumeKg: 0,
+    intensityVolumeKg: 0,
+    intensityExercises: [],
+  };
+
+  const withIntensity = new Set();
+
+  for (const session of sessionsIn(startKey, endKey)) {
+    const counts = sessionService.getSessionSetCounts(session);
+    const volume = sessionService.getSessionVolumeBreakdown(session);
+
+    totals.workingSets += counts.workingDone;
+    totals.unclassifiedSets += counts.legacyDone;
+    totals.warmupSets += counts.warmupDone;
+    totals.dropSequences += counts.dropSequences;
+    totals.failureSets += counts.failureSets;
+    totals.workingVolumeKg += volume.workingKg;
+    totals.warmupVolumeKg += volume.warmupKg;
+    totals.intensityVolumeKg += volume.intensityKg;
+
+    for (const entry of session.entries) {
+      if ((entry.intensitySets ?? []).length) {
+        withIntensity.add(
+          programService.getExercise(entry.exerciseId)?.name ?? entry.exerciseId
+        );
+      }
+    }
+  }
+
+  // Unclassified legacy sets are counted as working sets by the engine, so the
+  // headline figure has to include them or it will not match what progression
+  // actually read. The separate count is what keeps that visible.
+  totals.workingSets += totals.unclassifiedSets;
+  totals.intensityExercises = [...withIntensity];
+
+  return totals;
+}
+
+/**
+ * Discomfort logged in the period.
+ *
+ * Aggregated for reporting only. Nothing here is interpreted as a cause or a
+ * diagnosis — it counts what was recorded and where.
+ */
+function painBundle(startKey, endKey) {
+  const logs = sessionService.getPainLogsBetween(startKey, endKey);
+  if (!logs.length) {
+    return { count: 0, exercises: [], locations: [], maxScore: 0, stoppedCount: 0 };
+  }
+
+  return {
+    count: logs.length,
+    exercises: [...new Set(logs.map((log) => log.exerciseName))],
+    locations: [...new Set(logs.map((log) => log.location).filter(Boolean))],
+    maxScore: Math.max(...logs.map((log) => Number(log.score) || 0)),
+    stoppedCount: logs.filter((log) => log.action === 'stopped' || log.action === 'skipped').length,
+    logs,
+  };
 }
 
 function recoveryBundle(startKey, endKey) {

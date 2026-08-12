@@ -10,6 +10,8 @@ import * as sessionService from './session-service.js';
 import * as programService from './program-service.js';
 import * as bodyService from './body-service.js';
 import { estimate1rm } from '../engine/one-rep-max.js';
+import { volumeMultiplier } from '../engine/loading.js';
+import { normalizeEntry, entryVolume } from '../engine/set-model.js';
 import {
   rollingAverage, trendPerWeek, byWeek, fillWeeks, withinDays,
   summarise, niceBounds, weekStart,
@@ -189,12 +191,9 @@ export function volumeByMuscle(days = 90, endKey = today()) {
       const exercise = programService.getExercise(entry.exerciseId);
       if (!exercise) continue;
 
-      const multiplier = exercise.loadType === 'per-hand' ? 2 : 1;
-      let volume = 0;
-      for (const set of entry.sets) {
-        if (!set.completed || !set.reps) continue;
-        volume += (set.weightKg ?? 0) * set.reps * multiplier;
-      }
+      // Working sets only, and each load counted once — see
+      // engine/loading.volumeMultiplier and session-service.getSessionVolume.
+      const volume = entryVolume(normalizeEntry(entry), volumeMultiplier(exercise)).workingKg;
       if (volume <= 0) continue;
 
       const muscles = exercise.primaryMuscles?.length

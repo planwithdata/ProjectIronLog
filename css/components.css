@@ -613,3 +613,45 @@ textarea.input { min-height: 88px; resize: vertical; line-height: var(--lh-norma
    siblings sit immediately adjacent — expanding them would swallow the input
    between them. */
 .set-row__step::after { height: 100%; min-width: 0; }
+
+/* --- Inline reminder ----------------------------------------------------
+   The morning weigh-in prompt. Deliberately a banner and not a dialog: it must
+   never stand between the user and starting a workout, so it sits in the page
+   flow, takes two taps to resolve, and leaves on its own if ignored.
+   ====================================================================== */
+
+.reminder {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3);
+  margin-bottom: var(--s-4);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-hairline);
+}
+
+.reminder__body { flex: 1 1 auto; min-width: 0; }
+
+.reminder__title {
+  font-size: var(--t-subhead);
+  font-weight: var(--w-semibold);
+}
+
+.reminder__sub {
+  margin-top: 1px;
+  font-size: var(--t-caption);
+  color: var(--c-text-2);
+}
+
+.reminder__actions {
+  display: flex;
+  gap: var(--s-2);
+  flex: 0 0 auto;
+}
+
+@media (max-width: 400px) {
+  .reminder { flex-wrap: wrap; }
+  .reminder__actions { width: 100%; }
+  .reminder__actions .btn { flex: 1 1 auto; }
+}

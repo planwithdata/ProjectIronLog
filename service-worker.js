@@ -23,7 +23,7 @@
  * service worker runs outside the module graph and cannot import it.
  */
 
-const CACHE_VERSION = 'v1.6.0';
+const CACHE_VERSION = 'v1.7.0';
 const CACHE_NAME = `ironlog-${CACHE_VERSION}`;
 
 /**
@@ -59,6 +59,8 @@ const PRECACHE = [
   './js/core/router.js',
   './js/core/download.js',
   './js/engine/progression.js',
+  './js/engine/loading.js',
+  './js/engine/set-model.js',
   './js/engine/one-rep-max.js',
   './js/engine/analytics.js',
   './js/engine/review.js',
@@ -66,6 +68,8 @@ const PRECACHE = [
   './js/services/db.js',
   './js/services/program-service.js',
   './js/services/settings-service.js',
+  './js/services/training-prefs-service.js',
+  './js/services/reminder-service.js',
   './js/services/body-service.js',
   './js/services/notes-service.js',
   './js/services/session-service.js',
@@ -97,6 +101,8 @@ const PRECACHE = [
   './components/stat.js',
   './components/toast.js',
   './components/set-row.js',
+  './components/intensity-block.js',
+  './components/weight-entry.js',
   './components/rest-bar.js',
   './components/sheet.js',
   './components/chart-card.js',

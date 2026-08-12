@@ -17,6 +17,12 @@ import * as bodyService from '../services/body-service.js';
 import * as prService from '../services/pr-service.js';
 import { recovery, measurements, RECOVERY_FIELDS, MEASUREMENT_FIELDS } from '../services/logs-service.js';
 import * as notesService from '../services/notes-service.js';
+import * as trainingPrefs from '../services/training-prefs-service.js';
+import { describeLoad } from '../engine/loading.js';
+import {
+  normalizeEntry, workingSets, warmupSets, intensitySequences, isLegacyEntry,
+} from '../engine/set-model.js';
+import { formatLoad } from '../core/format.js';
 
 /** Quote a single field per RFC 4180. */
 function cell(value) {
@@ -45,15 +51,32 @@ export function toCsv(rows) {
 export function setsCsv() {
   const rows = [[
     'date', 'day', 'week', 'deload', 'exercise', 'equipment', 'category',
-    'set', 'weight_kg', 'reps', 'completed', 'rpe',
+    'set_kind', 'set', 'drop_sequence', 'drop_stage', 'to_failure',
+    'load_entry', 'weight_kg', 'weight_display', 'reps', 'completed', 'rpe',
     'target_weight_kg', 'target_reps', 'est_1rm_kg',
+    'pain_score', 'pain_location', 'pain_action', 'difficulty',
   ]];
+
+  const loadPrefs = trainingPrefs.getLoadPrefs();
 
   for (const session of [...sessionService.getCompletedSessions()].reverse()) {
     const day = programService.getDayById(session.dayId);
-    for (const entry of session.entries) {
-      const exercise = programService.getExercise(entry.exerciseId);
-      entry.sets.forEach((set, index) => {
+
+    for (const raw of session.entries) {
+      const exercise = programService.getExercise(raw.exerciseId);
+      const entry = normalizeEntry(raw);
+      const pain = entry.pain ?? {};
+
+      /**
+       * One row, whatever kind of set it came from.
+       *
+       * `set_kind` is what makes this export honest: a warm-up row and a drop
+       * stage sit in the same file as a working set, and the column says which
+       * is which, so a spreadsheet can filter to working sets and reproduce
+       * exactly what the progression engine saw.
+       */
+      const row = (set, { kind, index, sequence = '', stage = '' }) => {
+        const descriptor = exercise ? describeLoad(exercise, set.weightKg, loadPrefs) : null;
         rows.push([
           session.date,
           day?.label ?? session.dayId,
@@ -62,18 +85,48 @@ export function setsCsv() {
           exercise?.name ?? entry.exerciseId,
           exercise?.equipment ?? '',
           exercise?.category ?? '',
-          index + 1,
+          kind,
+          index === null ? '' : index + 1,
+          sequence,
+          stage,
+          set.toFailure ? 'yes' : '',
+          descriptor?.entry ?? '',
           set.weightKg ?? '',
+          descriptor ? formatLoad(descriptor, 'kg') : '',
           set.reps ?? '',
           set.completed ? 'yes' : 'no',
           set.rpe ?? '',
-          entry.targetWeightKg ?? '',
-          entry.targetReps?.[index] ?? '',
+          kind === 'working' || kind === 'legacy' ? entry.targetWeightKg ?? '' : '',
+          kind === 'working' || kind === 'legacy' ? entry.targetReps?.[index] ?? '' : '',
           set.completed && set.weightKg && set.reps
             ? round(prService.estimate1rm(set.weightKg, set.reps), 2)
             : '',
+          pain.score ?? '',
+          pain.location ?? '',
+          pain.action ?? '',
+          entry.difficulty ?? '',
         ]);
+      };
+
+      const workingKind = isLegacyEntry(entry) ? 'legacy' : 'working';
+
+      warmupSets(entry).forEach((set, index) => row(set, { kind: 'warmup', index }));
+      workingSets(entry).forEach((set, index) => row(set, { kind: workingKind, index }));
+      intensitySequences(entry).forEach((sequence, sequenceIndex) => {
+        sequence.stages.forEach((stage, stageIndex) => row(stage, {
+          kind: sequence.type === 'drop' ? 'drop' : 'failure',
+          index: null,
+          sequence: sequenceIndex + 1,
+          stage: stageIndex + 1,
+        }));
       });
+
+      // An exercise with nothing logged but a pain note still earns a row —
+      // "I tried and stopped" is data, and it must not vanish from the export.
+      if (!warmupSets(entry).length && !workingSets(entry).length
+          && !intensitySequences(entry).length && entry.pain) {
+        row({ weightKg: null, reps: null, completed: false }, { kind: 'skipped', index: null });
+      }
     }
   }
 
@@ -83,13 +136,19 @@ export function setsCsv() {
 /** One row per session, with its totals. */
 export function sessionsCsv() {
   const rows = [[
-    'date', 'day', 'week', 'deload', 'sets_done', 'sets_prescribed',
-    'completion_percent', 'volume_kg', 'duration_seconds',
+    'date', 'day', 'week', 'deload',
+    'working_sets_done', 'working_sets_prescribed', 'completion_percent',
+    'warmup_sets', 'drop_sequences', 'failure_sets', 'unclassified_sets',
+    'working_volume_kg', 'warmup_volume_kg', 'intensity_volume_kg',
+    'duration_seconds', 'pain_logs',
   ]];
 
   for (const session of [...sessionService.getCompletedSessions()].reverse()) {
     const day = programService.getDayById(session.dayId);
     const completion = sessionService.getSessionCompletion(session);
+    const counts = sessionService.getSessionSetCounts(session);
+    const volume = sessionService.getSessionVolumeBreakdown(session);
+
     rows.push([
       session.date,
       day?.label ?? session.dayId,
@@ -98,11 +157,35 @@ export function sessionsCsv() {
       completion.done,
       completion.total,
       completion.percent,
-      round(sessionService.getSessionVolume(session), 1),
+      counts.warmupDone,
+      counts.dropSequences,
+      counts.failureSets,
+      counts.legacyDone,
+      round(volume.workingKg, 1),
+      round(volume.warmupKg, 1),
+      round(volume.intensityKg, 1),
       session.durationSeconds ?? '',
+      sessionService.getPainLogs(session).length,
     ]);
   }
 
+  return toCsv(rows);
+}
+
+/** Every pain or discomfort note, one row each. */
+export function painCsv() {
+  const rows = [['date', 'exercise', 'score', 'location', 'action', 'alternative', 'note']];
+  for (const log of sessionService.getPainLogsBetween('0000-01-01', '9999-12-31')) {
+    rows.push([
+      log.date,
+      log.exerciseName,
+      log.score ?? '',
+      log.location ?? '',
+      log.action ?? '',
+      log.alternativeId ?? '',
+      log.note ?? '',
+    ]);
+  }
   return toCsv(rows);
 }
 
@@ -182,8 +265,9 @@ export function notesCsv() {
 
 /** Everything on offer, for the export list. */
 export const DATASETS = [
-  { key: 'sets',         label: 'Every logged set',   build: setsCsv,         describe: 'One row per set, with targets and estimated 1RM' },
-  { key: 'sessions',     label: 'Session summaries',  build: sessionsCsv,     describe: 'One row per workout, with volume and completion' },
+  { key: 'sets',         label: 'Every logged set',   build: setsCsv,         describe: 'One row per set, tagged warm-up / working / drop / failure' },
+  { key: 'sessions',     label: 'Session summaries',  build: sessionsCsv,     describe: 'One row per workout, with volume split by set type' },
+  { key: 'pain',         label: 'Discomfort log',     build: painCsv,         describe: 'Every pain note, with what you did about it' },
   { key: 'body',         label: 'Body metrics',       build: bodyCsv,         describe: 'Weigh-ins and all ten scale metrics' },
   { key: 'recovery',     label: 'Recovery logs',      build: recoveryCsv,     describe: 'Sleep, soreness, energy and stress' },
   { key: 'measurements', label: 'Measurements',       build: measurementsCsv, describe: 'Tape measurements in centimetres' },

@@ -1,12 +1,27 @@
 /**
  * progression.js — The double progression engine.
  *
- * This module is deliberately **pure**: it imports nothing, touches no
- * storage, and reads no globals. Everything it needs arrives as arguments and
- * everything it decides comes back as a return value. That is what makes it
- * testable outside a browser (`node tools/test.mjs`) — and this is the one
- * part of the app where a silent mistake would quietly wreck years of
- * training, so it needs to be tested rather than eyeballed.
+ * This module is deliberately **pure**: it touches no storage, reads no
+ * globals, and imports only its pure sibling `loading.js`. Everything it needs
+ * arrives as arguments and everything it decides comes back as a return value.
+ * That is what makes it testable outside a browser (`node tools/test.mjs`) —
+ * and this is the one part of the app where a silent mistake would quietly
+ * wreck years of training, so it needs to be tested rather than eyeballed.
+ *
+ * What this engine is allowed to see
+ * ---------------------------------
+ * **Working sets only.** Ramp-up sets and optional intensity work (drop sets,
+ * failure sets) are real training and appear in history and reports, but they
+ * must never move a prescribed load. That separation is structural rather than
+ * conditional: `session-service.getExerciseHistory` builds each performance
+ * from `entry.sets`, which under the v2 set model holds working sets and
+ * nothing else (see `engine/set-model.js`). There is no filter here to forget,
+ * because warm-ups never arrive here in the first place.
+ *
+ * A performance may also arrive flagged `painLimited` or `incomplete`. Those
+ * are excluded from stall detection — stopping a set because your elbow hurts
+ * is not evidence of getting weaker, and the engine must not respond to it by
+ * cutting the load.
  *
  * The rules it implements, verbatim from the program:
  *
@@ -24,11 +39,19 @@
  *   6. Week 5 is a deload: sets cut ~40%, load at 60-70% of Week 4.
  *   7. A lift stalled for 3 straight sessions drops ~10% and rebuilds.
  *
+ * And one rule that is Rish's rather than the document's:
+ *
+ *   8. Movements marked 'difficulty-first' (the ab wheel) climb a difficulty
+ *      ladder before they ever take external load. Reaching 12 reps earns
+ *      better control, more range, or a harder variation — not a plate.
+ *
  * Worked example from the brief, which `tools/test.mjs` asserts directly:
  *
  *   range 6-8, at 27.5 kg, logged 8 / 8 / 7 / 6
  *   -> stay at 27.5 kg, target 8 / 8 / 8 / 7
  */
+
+import { incrementScale, DEFAULT_LOAD_PREFS } from './loading.js';
 
 /** What the engine decided to do. */
 export const ACTIONS = {
@@ -38,6 +61,7 @@ export const ACTIONS = {
   REPS_FIRST:  'reps-first',   // bodyweight: add reps before any load
   DELOAD_WAVE: 'deload-wave',  // scheduled Week 5 deload
   DELOAD_STALL: 'deload-stall', // stalled 3 sessions — drop and rebuild
+  DIFFICULTY:  'difficulty',   // earned a harder variation, not more load
 };
 
 /** Sessions without improvement before the stall rule fires. */
@@ -54,12 +78,14 @@ export const DELOAD_LOAD_FACTOR = 0.65;
  *
  * @param {object} exercise   an entry from workouts.json
  * @param {Array<object>} history
- *        Past performances, **newest first**, each shaped
- *        `{ date, sets: [{ weightKg, reps, completed }], isDeload }`.
+ *        Past **working-set** performances, newest first, each shaped
+ *        `{ date, sets: [{ weightKg, reps, completed }], isDeload,
+ *           painLimited?, incomplete?, difficulty? }`.
  *        This is exactly what session-service.getExerciseHistory returns.
  * @param {object} [options]
  * @param {boolean} [options.isDeload]  true during the wave's deload week
  * @param {number}  [options.setCount]  override the prescribed set count
+ * @param {object}  [options.loadPrefs] display/increment conventions
  *
  * @returns {{
  *   action: string,
@@ -70,13 +96,20 @@ export const DELOAD_LOAD_FACTOR = 0.65;
  *   previous: {weightKg: number|null, reps: number[], date: string}|null,
  *   atTopOfRange: boolean,
  *   stalledSessions: number,
+ *   difficulty?: string,        // difficulty-first movements only
  * }}
  */
 export function recommend(exercise, history = [], options = {}) {
   const range = repRange(exercise);
   const setCount = options.setCount ?? exercise.sets;
-  const increment = incrementFor(exercise);
+  const increment = incrementFor(exercise, options.loadPrefs);
   const repsFirst = exercise.progression?.mode === 'reps-first';
+
+  // A difficulty-first movement never earns load by hitting the rep ceiling, so
+  // it branches before any of the weight arithmetic below.
+  if (exercise.progression?.mode === 'difficulty-first') {
+    return recommendDifficulty(exercise, history, { ...options, setCount, increment, range });
+  }
 
   // A pyramid (a different load and rep target per set) is a different shape
   // from the uniform-set default, so it gets its own branch rather than being
@@ -109,14 +142,19 @@ export function recommend(exercise, history = [], options = {}) {
 
   const lastWeight = workingWeight(last);
   const lastReps = completedSets(last).map((set) => set.reps ?? 0);
-  const previous = { weightKg: lastWeight, reps: lastReps, date: last.date };
+  const previous = {
+    weightKg: lastWeight,
+    reps: lastReps,
+    date: last.date,
+    painLimited: Boolean(last.painLimited),
+  };
 
   // "All working sets at the top of the range" is judged against the sets
   // actually prescribed. Hitting the top on three of four sets is a hold.
   const atTop = lastReps.length >= setCount
     && lastReps.slice(0, setCount).every((reps) => reps >= range.max);
 
-  const stalledSessions = countStalledSessions(working, range, setCount);
+  const stalledSessions = countStalledSessions(judgeableHistory(working, exercise), range, setCount);
 
   /* --- Scheduled deload week ------------------------------------------ */
   if (options.isDeload) {
@@ -184,12 +222,170 @@ export function recommend(exercise, history = [], options = {}) {
     weightKg: lastWeight,
     perSetReps: nextRepTargets(lastReps, setCount, range),
     increment,
-    reason: repsFirst
-      ? `Add a rep to any set below ${range.max}. No added load until every set hits ${range.max}.`
-      : `Stay at ${lastWeight === null ? 'the same weight' : `${trim(lastWeight)} kg`} and add a rep to any set below ${range.max}.`,
+    reason: holdReason({ exercise, last, lastWeight, range, repsFirst }),
     previous,
     atTopOfRange: false,
     stalledSessions,
+  };
+}
+
+/**
+ * Why we are holding — phrased for the situation rather than from a template.
+ *
+ * A pain-limited session gets different words on purpose. Telling someone whose
+ * elbow hurt last Wednesday to "add a rep to any set below 10" is the app
+ * pushing them into the exact rep that hurt.
+ */
+function holdReason({ exercise, last, lastWeight, range, repsFirst }) {
+  if (last?.painLimited && exercise?.painAware) {
+    return `Last session was cut short by discomfort. Repeat it only as far as it stays pain-free — `
+      + `${range.label} reps is the target, not a requirement.`;
+  }
+  if (repsFirst) {
+    return `Add a rep to any set below ${range.max}. No added load until every set hits ${range.max}.`;
+  }
+  return `Stay at ${lastWeight === null ? 'the same weight' : `${trim(lastWeight)} kg`} `
+    + `and add a rep to any set below ${range.max}.`;
+}
+
+/**
+ * The performances the engine may use to judge whether progress has stalled.
+ *
+ * Two exclusions, both narrow:
+ *
+ *   - **Pain-limited**, on any exercise. A session stopped because something
+ *     hurt says nothing about strength, and responding to it with the stall
+ *     rule would cut the load for having been sensible.
+ *   - **Incomplete**, on pain-aware exercises only. The brief is explicit that
+ *     incomplete pull-up sets must not read as a regression. Elsewhere an
+ *     unfinished session genuinely is a signal worth counting, so it still is.
+ *
+ * Excluded performances remain in the history, remain visible in reports, and
+ * still supply the current working load. They just do not vote on stalling.
+ */
+export function judgeableHistory(history = [], exercise = null) {
+  return history.filter((entry) => {
+    if (entry.painLimited) return false;
+    if (exercise?.painAware && entry.incomplete) return false;
+    return true;
+  });
+}
+
+/* --- Difficulty-first progression --------------------------------------
+   The ab wheel. Reaching the top of the rep range on a bodyweight core
+   movement does not mean "hang a plate on it" — it means the movement has
+   become easy enough to make harder. External resistance is the last rung of
+   the ladder, not the first response to 12 reps.
+   ====================================================================== */
+
+/** Rungs used when the program document does not define its own ladder. */
+export const DEFAULT_DIFFICULTY_LADDER = [
+  { id: 'standard', label: 'Standard', note: 'Controlled rollout, ribs down, no sag.' },
+  { id: 'slow-eccentric', label: 'Slow eccentric', note: 'Take 3-4 seconds on the way out.' },
+  { id: 'longer-rom', label: 'Longer range', note: 'Roll further out while keeping the ribs down.' },
+  { id: 'advanced', label: 'Advanced variation', note: 'From the feet, or standing.' },
+  { id: 'weighted', label: 'Weighted', note: 'Only now consider external resistance.' },
+];
+
+export function difficultyLadder(exercise) {
+  const ladder = exercise?.progression?.difficultyLadder;
+  return Array.isArray(ladder) && ladder.length ? ladder : DEFAULT_DIFFICULTY_LADDER;
+}
+
+export function difficultyRung(exercise, id) {
+  const ladder = difficultyLadder(exercise);
+  return ladder.find((rung) => rung.id === id) ?? ladder[0];
+}
+
+function recommendDifficulty(exercise, history, { isDeload, setCount, increment, range }) {
+  const ladder = difficultyLadder(exercise);
+  const working = history.filter((entry) => !entry.isDeload && completedSets(entry).length > 0);
+  const last = working[0] ?? null;
+
+  const base = {
+    increment,
+    weightKg: null,
+    perSetReps: fill(setCount, range.min),
+    atTopOfRange: false,
+    stalledSessions: 0,
+    previous: null,
+    difficulty: ladder[0].id,
+  };
+
+  if (!last) {
+    return {
+      ...base,
+      action: ACTIONS.START,
+      reason: `Build clean reps in the ${range.label} range at ${ladder[0].label.toLowerCase()} difficulty. `
+        + 'Progression here is control and range first, resistance last.',
+    };
+  }
+
+  const lastReps = completedSets(last).map((set) => set.reps ?? 0);
+  const lastWeight = workingWeight(last);
+  const currentId = last.difficulty ?? ladder[0].id;
+  const currentIndex = Math.max(0, ladder.findIndex((rung) => rung.id === currentId));
+  const current = ladder[currentIndex];
+  const previous = {
+    weightKg: lastWeight,
+    reps: lastReps,
+    date: last.date,
+    difficulty: currentId,
+    painLimited: Boolean(last.painLimited),
+  };
+
+  if (isDeload) {
+    return {
+      ...base,
+      action: ACTIONS.DELOAD_WAVE,
+      weightKg: lastWeight,
+      previous,
+      difficulty: currentId,
+      reason: `Deload week: fewer sets at ${current.label.toLowerCase()}. Keep the quality, drop the volume.`,
+    };
+  }
+
+  const atTop = lastReps.length >= setCount
+    && lastReps.slice(0, setCount).every((reps) => reps >= range.max);
+
+  if (!atTop) {
+    return {
+      ...base,
+      action: ACTIONS.REPS_FIRST,
+      weightKg: lastWeight,
+      perSetReps: nextRepTargets(lastReps, setCount, range),
+      previous,
+      difficulty: currentId,
+      reason: `Add a rep to any set below ${range.max} at ${current.label.toLowerCase()}. `
+        + 'Stop a rep short of losing position rather than grinding one out.',
+    };
+  }
+
+  const next = ladder[currentIndex + 1] ?? null;
+
+  // Top of the ladder: now, and only now, load is the remaining variable.
+  if (!next) {
+    return {
+      ...base,
+      action: ACTIONS.ADVANCE,
+      weightKg: (lastWeight ?? 0) + increment,
+      previous,
+      atTopOfRange: true,
+      difficulty: currentId,
+      reason: `Top of the range at ${current.label.toLowerCase()} — the hardest rung on the ladder. `
+        + `Add ${trim(increment)} kg and drop back to ${range.min} reps.`,
+    };
+  }
+
+  return {
+    ...base,
+    action: ACTIONS.DIFFICULTY,
+    weightKg: next.id === 'weighted' ? (lastWeight ?? 0) + increment : lastWeight,
+    previous,
+    atTopOfRange: true,
+    difficulty: next.id,
+    reason: `${range.max} reps on every set at ${current.label.toLowerCase()}. `
+      + `Move to ${next.label.toLowerCase()} and drop back to ${range.min} reps. ${next.note}`,
   };
 }
 
@@ -402,14 +598,27 @@ export function repRange(exercise) {
 }
 
 /**
- * The load step for one exercise.
+ * The load step for one exercise, in **stored** units.
  *
  * The program gives a range ("+2.5-5 kg"); the engine defaults to the bottom
  * of it because the source document is explicit that these are a ceiling on
  * how much to add, not a target. Smaller jumps also survive longer before
  * stalling.
+ *
+ * For a dumbbell pair the program's figure is per hand, while storage holds
+ * both dumbbells together, so the step is doubled: "+2.5 kg" means the next
+ * pair up, which is 5 kg of stored total. Without this the engine would
+ * recommend 52.5 kg — 26.25 kg per hand, a dumbbell that exists on no rack.
+ * See engine/loading.js `incrementScale`.
  */
-export function incrementFor(exercise) {
+export function incrementFor(exercise, loadPrefs = DEFAULT_LOAD_PREFS) {
+  const increment = exercise.progression?.increment;
+  const base = typeof increment === 'number' ? increment : (increment?.min ?? 2.5);
+  return round2(base * incrementScale(exercise, loadPrefs));
+}
+
+/** The program's own figure, unscaled — for showing the prescription as written. */
+export function programIncrement(exercise) {
   const increment = exercise.progression?.increment;
   if (typeof increment === 'number') return increment;
   return increment?.min ?? 2.5;
@@ -476,6 +685,7 @@ export function actionLabel(action) {
     case ACTIONS.REPS_FIRST:   return 'Add reps';
     case ACTIONS.DELOAD_WAVE:  return 'Deload';
     case ACTIONS.DELOAD_STALL: return 'Reset load';
+    case ACTIONS.DIFFICULTY:   return 'Harder variation';
     default:                   return '';
   }
 }
@@ -487,6 +697,7 @@ export function actionTone(action) {
     case ACTIONS.DELOAD_STALL: return 'danger';
     case ACTIONS.DELOAD_WAVE:  return 'warning';
     case ACTIONS.START:        return 'accent';
+    case ACTIONS.DIFFICULTY:   return 'success';
     default:                   return '';
   }
 }

@@ -20,6 +20,7 @@
 import * as sessionService from './session-service.js';
 import * as programService from './program-service.js';
 import { estimate1rm } from '../engine/one-rep-max.js';
+import { volumeMultiplier } from '../engine/loading.js';
 
 export { estimate1rm };
 
@@ -46,7 +47,10 @@ export function getRecordsFor(exerciseId) {
   if (!history.length) return null;
 
   const exercise = programService.getExercise(exerciseId);
-  const multiplier = exercise?.loadType === 'per-hand' ? 2 : 1;
+  // Records come from working sets only: `getExerciseHistory` supplies nothing
+  // else, so a drop set to a weight never held for a working set cannot become
+  // a "heaviest weight" PR. Each load counts once — see engine/loading.js.
+  const multiplier = volumeMultiplier(exercise);
 
   let weight = null;
   let reps = null;

@@ -21,6 +21,7 @@ import {
   earnedAdvance,
   repRange,
   incrementFor,
+  programIncrement,
   workingWeight,
   ACTIONS,
 } from '../js/engine/progression.js';
@@ -34,12 +35,21 @@ import {
 
 /* --- Fixtures ----------------------------------------------------------- */
 
-/** An exercise shaped like a workouts.json entry. */
+/**
+ * An exercise shaped like a workouts.json entry.
+ *
+ * A dumbbell movement, so its stored loads are the total of both dumbbells and
+ * its increment is applied on a per-hand basis: the program's "+2.5 kg" means
+ * the next pair up, which is 5 kg of stored total. Tests that care about a
+ * single-implement increment override `equipment` and `loadEntry`.
+ */
 function exercise(overrides = {}) {
   return {
     id: 'incline-dumbbell-press',
     name: 'Incline Dumbbell Press',
     equipment: 'dumbbell',
+    loadType: 'per-hand',
+    loadEntry: 'total-both',
     sets: 4,
     reps: { min: 6, max: 8, perSide: false, label: '6-8' },
     rest: { seconds: 150 },
@@ -89,8 +99,13 @@ test('nextRepTargets starts unlogged sets at the bottom of the range', () => {
 });
 
 test('a fixed rep prescription holds steady', () => {
-  // Face Pull is prescribed a flat 15, not a range.
+  // Face Pull is prescribed a flat 15, not a range. It is a cable movement, so
+  // its stored load is the raw stack value and the increment is not scaled.
   const facePull = exercise({
+    id: 'face-pull',
+    equipment: 'cable',
+    loadType: 'total',
+    loadEntry: 'machine',
     sets: 3,
     reps: { min: 15, max: 15, label: '15' },
     progression: { mode: 'weight', increment: { min: 1, max: 2 } },
@@ -105,16 +120,41 @@ test('a fixed rep prescription holds steady', () => {
 test('all sets at the top of the range advances the load and resets reps', () => {
   const result = recommend(exercise(), [performance(30, [8, 8, 8, 8])]);
   assert.equal(result.action, ACTIONS.ADVANCE);
-  assert.equal(result.weightKg, 32.5, 'adds the bottom of the +2.5-5 kg range');
+  // 30 kg of stored total is 15 kg per hand. The +2.5 kg increment is per hand,
+  // so the next rung is 17.5 per hand — 35 kg of total. Adding 2.5 to the total
+  // would prescribe 16.25 kg dumbbells, which do not exist.
+  assert.equal(result.weightKg, 35, 'advances by one dumbbell pair, not half of one');
   assert.deepEqual(result.perSetReps, [6, 6, 6, 6], 'drops back to the bottom of the range');
 });
 
 test('the increment defaults to the bottom of the range, not the top', () => {
   // The source document is explicit: '+X kg' is a ceiling, not a schedule.
-  assert.equal(incrementFor(exercise()), 2.5);
+  assert.equal(programIncrement(exercise()), 2.5, 'the program figure is unscaled');
   assert.equal(
-    incrementFor(exercise({ progression: { increment: { min: 1, max: 2 } } })),
+    programIncrement(exercise({ progression: { increment: { min: 1, max: 2 } } })),
     1
+  );
+});
+
+test('a dumbbell increment is applied per hand, a machine increment as logged', () => {
+  // The whole point of the load-entry model: the same "+2.5 kg" in the program
+  // document means different things on a dumbbell rack and on a cable stack.
+  assert.equal(incrementFor(exercise()), 5, 'dumbbell pair: +2.5 per hand = +5 total');
+  assert.equal(
+    incrementFor(exercise({ equipment: 'cable', loadEntry: 'machine' })),
+    2.5,
+    'machine: the stack moves by the figure as written'
+  );
+  assert.equal(
+    incrementFor(exercise({ equipment: 'barbell', loadEntry: 'plates' })),
+    2.5,
+    'barbell: plates move by the figure as written'
+  );
+  // Opting out returns to a literal reading of the program document.
+  assert.equal(
+    incrementFor(exercise(), { dumbbellIncrementBasis: 'total' }),
+    2.5,
+    'the basis is a preference, not a hardcoded rule'
   );
 });
 
@@ -146,6 +186,8 @@ test('a reps-first lift below the top of the range adds reps, not load', () => {
   const pullUps = exercise({
     id: 'pull-ups',
     equipment: 'bodyweight',
+    loadType: 'bodyweight-plus-added',
+    loadEntry: 'bodyweight-plus-added',
     sets: 4,
     reps: { min: 6, max: 10, label: '6-10' },
     progression: { mode: 'reps-first', increment: { min: 2.5, max: 5 } },
@@ -161,6 +203,8 @@ test('a reps-first lift at the top of the range graduates to added load', () => 
   const pullUps = exercise({
     id: 'pull-ups',
     equipment: 'bodyweight',
+    loadType: 'bodyweight-plus-added',
+    loadEntry: 'bodyweight-plus-added',
     sets: 4,
     reps: { min: 6, max: 10, label: '6-10' },
     progression: { mode: 'reps-first', increment: { min: 2.5, max: 5 } },
@@ -246,7 +290,7 @@ test('a deload session is ignored when judging the next real session', () => {
   ];
   const result = recommend(exercise(), history);
   assert.equal(result.action, ACTIONS.ADVANCE);
-  assert.equal(result.weightKg, 42.5, 'advances from the 40 kg working set');
+  assert.equal(result.weightKg, 45, 'advances from the 40 kg working set, one pair up');
 });
 
 /* --- Working weight ----------------------------------------------------- */
