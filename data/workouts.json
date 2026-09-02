@@ -1,12 +1,15 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "program": {
     "id": "rish-6day-double-progression",
     "name": "Rish's Gym Program",
     "subtitle": "6-Day Split with Progressive Overload Scheme",
     "units": "kg",
     "source": {
-      "files": ["Rish Workout Program.docx", "Rish_WorkoutRoutine.pdf"],
+      "files": [
+        "Rish Workout Program.docx",
+        "Rish_WorkoutRoutine.pdf"
+      ],
       "notes": "Sets, reps, rest and weight increments are taken verbatim from the DOCX tables. Day focus text comes from the PDF handbook. Equipment, muscle and category tags are app metadata added for analytics and are safe to edit."
     },
     "amendments": [
@@ -16,7 +19,10 @@
       "Ab Wheel Rollout progresses by difficulty rather than by load: build clean reps, then control and range, then a harder variation, and only then external resistance.",
       "Pull-ups are logged pain-aware: fewer pain-free reps, an incomplete set or a switch to a pulldown are all valid outcomes and are not read as a strength regression.",
       "Ramp-up sets, drop sets and failure sets are recorded separately from working sets. Only working sets drive progressive overload.",
-      "Thursday: Hack Squat replaces Back Squat. Week one's squats were hack squats logged under the movement that occupied the slot at the time, so the v2 -> v3 migration relabels those entries; the loads move with them untouched and are now read as machine values rather than as plates on a bar."
+      "Thursday: Hack Squat replaces Back Squat. Week one's squats were hack squats logged under the movement that occupied the slot at the time, so the v2 -> v3 migration relabels those entries; the loads move with them untouched and are now read as machine values rather than as plates on a bar.",
+      "Pallof Press is 2 sets, not 3, and is maintained rather than progressed: it is an anti-rotation brace held at a load you can keep position against, with a 2-second hold and no slow eccentric. It is the last movement of a long chest day and had become the slowest, for no training return.",
+      "Cable and machine readings are recorded per machine. The number on one stack is not comparable to the number on the next, so loads are only ever compared within the same tagged machine and attachment; an untagged jump larger than any programmed increment is flagged as a probable equipment change rather than read as a strength change.",
+      "A planned movement may be performed as a listed substitute — a bar triceps pushdown where the program says rope, say. The session counts as performed rather than skipped, the slot keeps its adherence, and the substitute's loads are kept in their own series because an attachment change is not a strength change."
     ],
     "review": {
       "everyDays": 14,
@@ -37,16 +43,43 @@
       }
     },
     "weeklySplit": [
-      { "weekday": 1, "day": "Monday", "label": "Rest" },
-      { "weekday": 2, "day": "Tuesday", "label": "Chest Priority" },
-      { "weekday": 3, "day": "Wednesday", "label": "Back & Biceps" },
-      { "weekday": 4, "day": "Thursday", "label": "Legs" },
-      { "weekday": 5, "day": "Friday", "label": "Recovery" },
-      { "weekday": 6, "day": "Saturday", "label": "Upper" },
-      { "weekday": 7, "day": "Sunday", "label": "Posterior Chain" }
+      {
+        "weekday": 1,
+        "day": "Monday",
+        "label": "Rest"
+      },
+      {
+        "weekday": 2,
+        "day": "Tuesday",
+        "label": "Chest Priority"
+      },
+      {
+        "weekday": 3,
+        "day": "Wednesday",
+        "label": "Back & Biceps"
+      },
+      {
+        "weekday": 4,
+        "day": "Thursday",
+        "label": "Legs"
+      },
+      {
+        "weekday": 5,
+        "day": "Friday",
+        "label": "Recovery"
+      },
+      {
+        "weekday": 6,
+        "day": "Saturday",
+        "label": "Upper"
+      },
+      {
+        "weekday": 7,
+        "day": "Sunday",
+        "label": "Posterior Chain"
+      }
     ]
   },
-
   "progression": {
     "type": "double-progression",
     "summary": "Work within a rep range instead of chasing a fixed number. Progress the weight only once you have earned it.",
@@ -63,36 +96,65 @@
       "note": "If a lift stalls for 3 straight sessions with no rep or weight increase, drop the weight about 10% and rebuild. This is normal, not a failure."
     },
     "warmup": {
-      "rampUpSets": [2, 3],
-      "appliesTo": ["compound"],
+      "rampUpSets": [
+        2,
+        3
+      ],
+      "appliesTo": [
+        "compound"
+      ],
       "note": "Warm up compound lifts with 2-3 ramp-up sets before your first working set. These are not counted as working sets."
     },
     "intensity": {
-      "techniques": ["drop", "failure"],
+      "techniques": [
+        "drop",
+        "failure"
+      ],
       "affectsProgression": false,
-      "defaultAllowedFor": ["isolation", "core"],
+      "defaultAllowedFor": [
+        "isolation",
+        "core"
+      ],
       "note": "Drop sets and failure sets are optional supplementary work, chosen session by session. They are logged separately and never determine the next programmed working weight."
     },
     "difficulty": {
-      "appliesTo": ["difficulty-first"],
+      "appliesTo": [
+        "difficulty-first"
+      ],
       "note": "For bodyweight core movements, progression runs: build clean reps in range, then improve control, then increase range of motion, then increase difficulty, and only then consider external resistance."
+    },
+    "maintained": {
+      "appliesTo": [
+        "maintain"
+      ],
+      "note": "Some movements are done for quality, not load: a fixed rep count at a weight you can hold position against. They hold their load, never advance on a rep ceiling, and never trigger a stall deload — there is nothing to deload from."
+    },
+    "loadContext": {
+      "note": "A cable stack reading is an arbitrary scale, not a mass. Loads are compared only within one machine and attachment. Nothing is ever converted between machines: the app labels the reading rather than pretending to normalise it.",
+      "discontinuityRatio": 1.35,
+      "discontinuityMinKg": 2,
+      "appliesTo": [
+        "machine"
+      ]
+    },
+    "substitution": {
+      "note": "A substitution is performed work, not a skipped exercise. It keeps the slot's adherence and its own load series.",
+      "comparableLoadDefault": false
     }
   },
-
   "generalRules": [
     "Warm up compound lifts (Squat, RDL, Bench/Incline Press) with 2-3 ramp-up sets before your first working set - these aren't counted in the sets above.",
     "If a lift stalls for 3 straight sessions (no rep or weight increase), drop the weight ~10% and rebuild - this is normal, not a failure.",
     "Sleep and protein intake drive whether this progression scheme actually works. Without them, added weight on the bar will stall regardless of effort in the gym."
   ],
-
   "missedDayRules": [
     "Treat the split as rolling, not calendar-locked - if you miss Thursday's Legs day, just do it Friday, and every day after shifts back by one.",
     "Avoid stacking two heavy sessions for the same muscle group back-to-back - leave at least a day of gap between them where possible.",
     "If a missed day would otherwise force 3 straight lifting days in a row, drop that week's Friday recovery walk/mobility session instead of skipping a lifting day.",
     "If you miss two days in a row, don't cram both sessions back-to-back - just resume the split from wherever you are and let the missed session roll into next week.",
-    "Don't add extra volume elsewhere to 'make up' for a skipped muscle group - one missed session per month has minimal impact on progress; doubling up elsewhere risks overtraining."
+    "Don't add extra volume elsewhere to 'make up' for a skipped muscle group - one missed session per month has minimal impact on progress; doubling up elsewhere risks overtraining.",
+    "A missed session can be performed on any later day: pick that day's workout from Home or the Workout screen and log it as normal. The app records which day it was scheduled for and which day it was actually done, so the split stays legible and the session is not counted as missed."
   ],
-
   "retiredExercises": [
     {
       "_note": "Kept as a fallback, not as a home for history: the v2 -> v3 migration relabels every logged back-squat entry to hack-squat, so nothing should resolve here. It stays so that a stale id arriving from an old export, or an entry the migration declined to touch, still reads as a named barbell lift instead of a bare slug with unlabelled numbers.",
@@ -105,19 +167,46 @@
       "loadEntry": "plates",
       "intensityTechniquesAllowed": false,
       "barWeightKg": 20,
-      "warmup": { "supported": true, "rampSets": 3 },
+      "warmup": {
+        "supported": true,
+        "rampSets": 3
+      },
       "category": "compound",
-      "primaryMuscles": ["Quads"],
-      "secondaryMuscles": ["Glutes", "Core"],
+      "primaryMuscles": [
+        "Quads"
+      ],
+      "secondaryMuscles": [
+        "Glutes",
+        "Core"
+      ],
       "sets": 4,
-      "reps": { "min": 6, "max": 8, "perSide": false, "label": "6-8" },
-      "rest": { "seconds": 150, "minSeconds": 120, "maxSeconds": 180, "label": "2-3 min" },
-      "progression": { "mode": "weight", "increment": { "min": 2.5, "max": 5 }, "label": "+2.5-5 kg" },
-      "cues": ["Bar rests on the upper shoulders, feet about shoulder-width.", "Brace the core before you descend."],
+      "reps": {
+        "min": 6,
+        "max": 8,
+        "perSide": false,
+        "label": "6-8"
+      },
+      "rest": {
+        "seconds": 150,
+        "minSeconds": 120,
+        "maxSeconds": 180,
+        "label": "2-3 min"
+      },
+      "progression": {
+        "mode": "weight",
+        "increment": {
+          "min": 2.5,
+          "max": 5
+        },
+        "label": "+2.5-5 kg"
+      },
+      "cues": [
+        "Bar rests on the upper shoulders, feet about shoulder-width.",
+        "Brace the core before you descend."
+      ],
       "notes": ""
     }
   ],
-
   "days": [
     {
       "id": "monday-rest",
@@ -133,7 +222,6 @@
       ],
       "exercises": []
     },
-
     {
       "id": "tuesday-chest",
       "weekday": 2,
@@ -159,13 +247,34 @@
           "role": "pre-workout-warmup",
           "optional": true,
           "warmupOnly": true,
-          "primaryMuscles": ["Chest"],
-          "secondaryMuscles": ["Front delts", "Triceps"],
+          "primaryMuscles": [
+            "Chest"
+          ],
+          "secondaryMuscles": [
+            "Front delts",
+            "Triceps"
+          ],
           "sets": 0,
-          "warmup": { "supported": true, "rampSets": 2 },
-          "reps": { "min": 8, "max": 15, "perSide": false, "label": "8-15" },
-          "rest": { "seconds": 60, "minSeconds": 45, "maxSeconds": 90, "label": "1 min" },
-          "progression": { "mode": "none", "label": "not progressed" },
+          "warmup": {
+            "supported": true,
+            "rampSets": 2
+          },
+          "reps": {
+            "min": 8,
+            "max": 15,
+            "perSide": false,
+            "label": "8-15"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 45,
+            "maxSeconds": 90,
+            "label": "1 min"
+          },
+          "progression": {
+            "mode": "none",
+            "label": "not progressed"
+          },
           "cues": [
             "One or two sets, and stop well short of failure.",
             "This wakes the chest and shoulders up; it does not pre-fatigue them."
@@ -180,15 +289,43 @@
           "loadType": "per-hand",
           "loadEntry": "total-both",
           "intensityTechniquesAllowed": false,
-          "warmup": { "supported": true, "rampSets": 3 },
+          "warmup": {
+            "supported": true,
+            "rampSets": 3
+          },
           "category": "compound",
-          "primaryMuscles": ["Upper chest"],
-          "secondaryMuscles": ["Front delts", "Triceps"],
+          "primaryMuscles": [
+            "Upper chest"
+          ],
+          "secondaryMuscles": [
+            "Front delts",
+            "Triceps"
+          ],
           "sets": 4,
-          "reps": { "min": 6, "max": 8, "perSide": false, "label": "6-8" },
-          "rest": { "seconds": 150, "minSeconds": 120, "maxSeconds": 180, "label": "2-3 min" },
-          "progression": { "mode": "weight", "increment": { "min": 2.5, "max": 5 }, "label": "+2.5-5 kg" },
-          "cues": ["Retract the shoulder blades before the first rep.", "Control a 2-3 second eccentric."],
+          "reps": {
+            "min": 6,
+            "max": 8,
+            "perSide": false,
+            "label": "6-8"
+          },
+          "rest": {
+            "seconds": 150,
+            "minSeconds": 120,
+            "maxSeconds": 180,
+            "label": "2-3 min"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2.5,
+              "max": 5
+            },
+            "label": "+2.5-5 kg"
+          },
+          "cues": [
+            "Retract the shoulder blades before the first rep.",
+            "Control a 2-3 second eccentric."
+          ],
           "notes": ""
         },
         {
@@ -199,15 +336,42 @@
           "loadType": "per-hand",
           "loadEntry": "total-both",
           "intensityTechniquesAllowed": false,
-          "warmup": { "supported": true, "rampSets": 2 },
+          "warmup": {
+            "supported": true,
+            "rampSets": 2
+          },
           "category": "compound",
-          "primaryMuscles": ["Mid chest"],
-          "secondaryMuscles": ["Front delts", "Triceps"],
+          "primaryMuscles": [
+            "Mid chest"
+          ],
+          "secondaryMuscles": [
+            "Front delts",
+            "Triceps"
+          ],
           "sets": 3,
-          "reps": { "min": 8, "max": 10, "perSide": false, "label": "8-10" },
-          "rest": { "seconds": 120, "minSeconds": 120, "maxSeconds": 120, "label": "2 min" },
-          "progression": { "mode": "weight", "increment": { "min": 2, "max": 2.5 }, "label": "+2-2.5 kg" },
-          "cues": ["Keep the elbows tucked to roughly 45 degrees."],
+          "reps": {
+            "min": 8,
+            "max": 10,
+            "perSide": false,
+            "label": "8-10"
+          },
+          "rest": {
+            "seconds": 120,
+            "minSeconds": 120,
+            "maxSeconds": 120,
+            "label": "2 min"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2,
+              "max": 2.5
+            },
+            "label": "+2-2.5 kg"
+          },
+          "cues": [
+            "Keep the elbows tucked to roughly 45 degrees."
+          ],
           "notes": ""
         },
         {
@@ -218,16 +382,48 @@
           "loadType": "total",
           "loadEntry": "machine",
           "intensityTechniquesAllowed": false,
-          "warmup": { "supported": true, "rampSets": 2 },
+          "warmup": {
+            "supported": true,
+            "rampSets": 2
+          },
           "category": "compound",
-          "primaryMuscles": ["Mid chest"],
-          "secondaryMuscles": ["Front delts", "Triceps"],
+          "primaryMuscles": [
+            "Mid chest"
+          ],
+          "secondaryMuscles": [
+            "Front delts",
+            "Triceps"
+          ],
           "sets": 3,
-          "reps": { "min": 8, "max": 10, "perSide": false, "label": "8-10" },
-          "rest": { "seconds": 90, "minSeconds": 90, "maxSeconds": 90, "label": "90 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 2, "max": 2.5 }, "label": "+2-2.5 kg" },
-          "cues": ["Press through the chest, not the shoulders."],
-          "notes": ""
+          "reps": {
+            "min": 8,
+            "max": 10,
+            "perSide": false,
+            "label": "8-10"
+          },
+          "rest": {
+            "seconds": 90,
+            "minSeconds": 90,
+            "maxSeconds": 90,
+            "label": "90 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2,
+              "max": 2.5
+            },
+            "label": "+2-2.5 kg"
+          },
+          "cues": [
+            "Press through the chest, not the shoulders."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like."
+          }
         },
         {
           "id": "low-to-high-cable-fly",
@@ -239,15 +435,57 @@
           "intensityTechniquesAllowed": true,
           "perSideLoad": true,
           "category": "isolation",
-          "primaryMuscles": ["Upper chest"],
-          "secondaryMuscles": ["Front delts"],
+          "primaryMuscles": [
+            "Upper chest"
+          ],
+          "secondaryMuscles": [
+            "Front delts"
+          ],
           "sets": 3,
-          "reps": { "min": 12, "max": 15, "perSide": false, "label": "12-15" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Sweep the hands up and together, finishing above chest height.", "Keep a soft, fixed elbow angle throughout."],
+          "reps": {
+            "min": 12,
+            "max": 15,
+            "perSide": false,
+            "label": "12-15"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Sweep the hands up and together, finishing above chest height.",
+            "Keep a soft, fixed elbow angle throughout."
+          ],
           "notes": "Replaces the High-to-Low Cable Fly to bias the upper chest.",
-          "replaces": "high-to-low-cable-fly"
+          "replaces": "high-to-low-cable-fly",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like.",
+            "attachments": [
+              "single handle",
+              "D-handle",
+              "rope"
+            ]
+          },
+          "substitutions": [
+            {
+              "id": "pec-deck-fly",
+              "label": "Pec deck fly",
+              "comparableLoad": false,
+              "note": "A fixed-path fly when both cable stations are taken."
+            }
+          ]
         },
         {
           "id": "dumbbell-lateral-raise",
@@ -258,13 +496,35 @@
           "loadEntry": "total-both",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Side delts"],
+          "primaryMuscles": [
+            "Side delts"
+          ],
           "secondaryMuscles": [],
           "sets": 3,
-          "reps": { "min": 12, "max": 15, "perSide": false, "label": "12-15" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["No swinging - lead with the elbows.", "Stop at shoulder height."],
+          "reps": {
+            "min": 12,
+            "max": 15,
+            "perSide": false,
+            "label": "12-15"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "No swinging - lead with the elbows.",
+            "Stop at shoulder height."
+          ],
           "notes": ""
         },
         {
@@ -276,14 +536,54 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Triceps"],
+          "primaryMuscles": [
+            "Triceps"
+          ],
           "secondaryMuscles": [],
           "sets": 3,
-          "reps": { "min": 10, "max": 12, "perSide": false, "label": "10-12" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Pin the elbows to your sides and spread the rope at the bottom."],
-          "notes": ""
+          "reps": {
+            "min": 10,
+            "max": 12,
+            "perSide": false,
+            "label": "10-12"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Pin the elbows to your sides and spread the rope at the bottom."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like.",
+            "attachments": [
+              "rope",
+              "straight bar",
+              "V-bar",
+              "single handle"
+            ]
+          },
+          "substitutions": [
+            {
+              "id": "bar-triceps-pushdown",
+              "label": "Bar triceps pushdown",
+              "comparableLoad": false,
+              "note": "The same movement with a straight or V-bar. Equally good work; the stack reading is not comparable, so it keeps its own load history."
+            }
+          ]
         },
         {
           "id": "overhead-rope-extension",
@@ -294,14 +594,53 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Triceps"],
+          "primaryMuscles": [
+            "Triceps"
+          ],
           "secondaryMuscles": [],
           "sets": 3,
-          "reps": { "min": 10, "max": 12, "perSide": false, "label": "10-12" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Get a full stretch at the bottom with the elbows high."],
-          "notes": ""
+          "reps": {
+            "min": 10,
+            "max": 12,
+            "perSide": false,
+            "label": "10-12"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Get a full stretch at the bottom with the elbows high."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like.",
+            "attachments": [
+              "rope",
+              "straight bar",
+              "single handle"
+            ]
+          },
+          "substitutions": [
+            {
+              "id": "overhead-bar-extension",
+              "label": "Overhead bar extension",
+              "comparableLoad": false,
+              "note": "Same overhead position with an EZ or straight bar."
+            }
+          ]
         },
         {
           "id": "hanging-knee-raise",
@@ -312,13 +651,36 @@
           "loadEntry": "bodyweight-plus-added",
           "intensityTechniquesAllowed": true,
           "category": "core",
-          "primaryMuscles": ["Abs"],
-          "secondaryMuscles": ["Hip flexors"],
+          "primaryMuscles": [
+            "Abs"
+          ],
+          "secondaryMuscles": [
+            "Hip flexors"
+          ],
           "sets": 3,
-          "reps": { "min": 12, "max": 15, "perSide": false, "label": "12-15" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "reps-first", "increment": { "min": 1, "max": 2 }, "label": "add reps first" },
-          "cues": ["Curl the pelvis up rather than just lifting the knees."],
+          "reps": {
+            "min": 12,
+            "max": 15,
+            "perSide": false,
+            "label": "12-15"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "reps-first",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "add reps first"
+          },
+          "cues": [
+            "Curl the pelvis up rather than just lifting the knees."
+          ],
           "notes": ""
         },
         {
@@ -330,18 +692,53 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": true,
           "category": "core",
-          "primaryMuscles": ["Obliques"],
-          "secondaryMuscles": ["Abs"],
-          "sets": 3,
-          "reps": { "min": 12, "max": 12, "perSide": true, "label": "12/side" },
-          "rest": { "seconds": 45, "minSeconds": 45, "maxSeconds": 45, "label": "45 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Resist rotation - the reps happen in your core, not your arms."],
-          "notes": ""
+          "primaryMuscles": [
+            "Obliques"
+          ],
+          "secondaryMuscles": [
+            "Abs"
+          ],
+          "sets": 2,
+          "reps": {
+            "min": 10,
+            "max": 12,
+            "perSide": true,
+            "label": "10-12/side"
+          },
+          "rest": {
+            "seconds": 45,
+            "minSeconds": 30,
+            "maxSeconds": 45,
+            "label": "30-45 sec"
+          },
+          "progression": {
+            "mode": "maintain",
+            "label": "held, not progressed",
+            "summary": "Keep the reps clean at a load you can hold position against. Change the load only when bracing gets easy or the position breaks down."
+          },
+          "cues": [
+            "Resist rotation - the reps happen in your core, not your arms.",
+            "Press out, hold about two seconds, come back at a normal speed.",
+            "If you are grinding or leaning, the load is too heavy - this is not a lift to push."
+          ],
+          "notes": "Two sets, and deliberately not progressed. It closes out a long session, so it is kept short: a fixed rep count, a two-second hold, and no ladder to climb.",
+          "tempo": {
+            "holdSeconds": 2,
+            "label": "Press out, hold about 2 seconds, return at a normal speed.",
+            "note": "Not a slow-tempo exercise. The work is resisting rotation, and a five-second hold on every rep adds time rather than tension."
+          },
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like.",
+            "attachments": [
+              "single handle",
+              "rope"
+            ]
+          }
         }
       ]
     },
-
     {
       "id": "wednesday-back-biceps",
       "weekday": 3,
@@ -365,19 +762,56 @@
           "intensityTechniquesAllowed": false,
           "painAware": true,
           "alternatives": [
-            { "id": "neutral-grip-lat-pulldown", "label": "Neutral-grip pulldown" },
-            { "id": "wide-grip-lat-pulldown", "label": "Wide-grip pulldown" },
-            { "id": "assisted-pull-up", "label": "Assisted pull-up" },
-            { "id": "other", "label": "Other" }
+            {
+              "id": "neutral-grip-lat-pulldown",
+              "label": "Neutral-grip pulldown"
+            },
+            {
+              "id": "wide-grip-lat-pulldown",
+              "label": "Wide-grip pulldown"
+            },
+            {
+              "id": "assisted-pull-up",
+              "label": "Assisted pull-up"
+            },
+            {
+              "id": "other",
+              "label": "Other"
+            }
           ],
           "category": "compound",
-          "primaryMuscles": ["Lats"],
-          "secondaryMuscles": ["Biceps", "Mid back"],
+          "primaryMuscles": [
+            "Lats"
+          ],
+          "secondaryMuscles": [
+            "Biceps",
+            "Mid back"
+          ],
           "sets": 4,
-          "reps": { "min": 6, "max": 10, "perSide": false, "label": "6-10" },
-          "rest": { "seconds": 120, "minSeconds": 120, "maxSeconds": 120, "label": "2 min" },
-          "progression": { "mode": "reps-first", "increment": { "min": 2.5, "max": 5 }, "label": "add reps first" },
-          "cues": ["Pull until the chin clears the bar.", "Lower until arms and shoulders are fully extended."],
+          "reps": {
+            "min": 6,
+            "max": 10,
+            "perSide": false,
+            "label": "6-10"
+          },
+          "rest": {
+            "seconds": 120,
+            "minSeconds": 120,
+            "maxSeconds": 120,
+            "label": "2 min"
+          },
+          "progression": {
+            "mode": "reps-first",
+            "increment": {
+              "min": 2.5,
+              "max": 5
+            },
+            "label": "add reps first"
+          },
+          "cues": [
+            "Pull until the chin clears the bar.",
+            "Lower until arms and shoulders are fully extended."
+          ],
           "notes": "Log added weight only (dip belt or vest). Leave at 0 until you hit the top of the range comfortably."
         },
         {
@@ -389,14 +823,56 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": false,
           "category": "compound",
-          "primaryMuscles": ["Lats"],
-          "secondaryMuscles": ["Mid back", "Biceps"],
+          "primaryMuscles": [
+            "Lats"
+          ],
+          "secondaryMuscles": [
+            "Mid back",
+            "Biceps"
+          ],
           "sets": 3,
-          "reps": { "min": 8, "max": 10, "perSide": false, "label": "8-10" },
-          "rest": { "seconds": 90, "minSeconds": 90, "maxSeconds": 90, "label": "90 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 2, "max": 2.5 }, "label": "+2-2.5 kg" },
-          "cues": ["Pull the bar to the upper/mid chest.", "Drive the elbows down, don't pull with the hands."],
-          "notes": ""
+          "reps": {
+            "min": 8,
+            "max": 10,
+            "perSide": false,
+            "label": "8-10"
+          },
+          "rest": {
+            "seconds": 90,
+            "minSeconds": 90,
+            "maxSeconds": 90,
+            "label": "90 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2,
+              "max": 2.5
+            },
+            "label": "+2-2.5 kg"
+          },
+          "cues": [
+            "Pull the bar to the upper/mid chest.",
+            "Drive the elbows down, don't pull with the hands."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like.",
+            "attachments": [
+              "wide bar",
+              "long bar"
+            ]
+          },
+          "substitutions": [
+            {
+              "id": "neutral-grip-lat-pulldown",
+              "label": "Neutral-grip pulldown",
+              "comparableLoad": false,
+              "note": "Already in the program on Saturday, so its own history applies."
+            }
+          ]
         },
         {
           "id": "chest-supported-row",
@@ -407,14 +883,43 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": false,
           "category": "compound",
-          "primaryMuscles": ["Mid back"],
-          "secondaryMuscles": ["Lats", "Rear delts"],
+          "primaryMuscles": [
+            "Mid back"
+          ],
+          "secondaryMuscles": [
+            "Lats",
+            "Rear delts"
+          ],
           "sets": 3,
-          "reps": { "min": 8, "max": 10, "perSide": false, "label": "8-10" },
-          "rest": { "seconds": 90, "minSeconds": 90, "maxSeconds": 90, "label": "90 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 2, "max": 2.5 }, "label": "+2-2.5 kg" },
-          "cues": ["Chest stays glued to the pad - no body English."],
-          "notes": ""
+          "reps": {
+            "min": 8,
+            "max": 10,
+            "perSide": false,
+            "label": "8-10"
+          },
+          "rest": {
+            "seconds": 90,
+            "minSeconds": 90,
+            "maxSeconds": 90,
+            "label": "90 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2,
+              "max": 2.5
+            },
+            "label": "+2-2.5 kg"
+          },
+          "cues": [
+            "Chest stays glued to the pad - no body English."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like."
+          }
         },
         {
           "id": "one-arm-cable-row",
@@ -425,14 +930,47 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": false,
           "category": "compound",
-          "primaryMuscles": ["Lats"],
-          "secondaryMuscles": ["Mid back", "Biceps"],
+          "primaryMuscles": [
+            "Lats"
+          ],
+          "secondaryMuscles": [
+            "Mid back",
+            "Biceps"
+          ],
           "sets": 3,
-          "reps": { "min": 10, "max": 12, "perSide": false, "label": "10-12" },
-          "rest": { "seconds": 75, "minSeconds": 75, "maxSeconds": 75, "label": "75 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Let the shoulder travel forward for a full stretch, then row."],
-          "notes": ""
+          "reps": {
+            "min": 10,
+            "max": 12,
+            "perSide": false,
+            "label": "10-12"
+          },
+          "rest": {
+            "seconds": 75,
+            "minSeconds": 75,
+            "maxSeconds": 75,
+            "label": "75 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Let the shoulder travel forward for a full stretch, then row."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like.",
+            "attachments": [
+              "single handle",
+              "D-handle"
+            ]
+          }
         },
         {
           "id": "straight-arm-pulldown",
@@ -443,14 +981,45 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Lats"],
+          "primaryMuscles": [
+            "Lats"
+          ],
           "secondaryMuscles": [],
           "sets": 3,
-          "reps": { "min": 12, "max": 15, "perSide": false, "label": "12-15" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Keep the elbows locked at a fixed angle and sweep to the thighs."],
-          "notes": ""
+          "reps": {
+            "min": 12,
+            "max": 15,
+            "perSide": false,
+            "label": "12-15"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Keep the elbows locked at a fixed angle and sweep to the thighs."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like.",
+            "attachments": [
+              "straight bar",
+              "rope",
+              "EZ bar"
+            ]
+          }
         },
         {
           "id": "incline-dumbbell-curl",
@@ -461,13 +1030,35 @@
           "loadEntry": "total-both",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Biceps"],
+          "primaryMuscles": [
+            "Biceps"
+          ],
           "secondaryMuscles": [],
           "sets": 3,
-          "reps": { "min": 10, "max": 12, "perSide": false, "label": "10-12" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Let the arms hang behind the torso for a full biceps stretch.", "No swinging."],
+          "reps": {
+            "min": 10,
+            "max": 12,
+            "perSide": false,
+            "label": "10-12"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Let the arms hang behind the torso for a full biceps stretch.",
+            "No swinging."
+          ],
           "notes": ""
         },
         {
@@ -479,13 +1070,36 @@
           "loadEntry": "total-both",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Biceps"],
-          "secondaryMuscles": ["Forearms"],
+          "primaryMuscles": [
+            "Biceps"
+          ],
+          "secondaryMuscles": [
+            "Forearms"
+          ],
           "sets": 3,
-          "reps": { "min": 10, "max": 12, "perSide": false, "label": "10-12" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Neutral grip held throughout - keep the elbows still."],
+          "reps": {
+            "min": 10,
+            "max": 12,
+            "perSide": false,
+            "label": "10-12"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Neutral grip held throughout - keep the elbows still."
+          ],
           "notes": ""
         },
         {
@@ -497,18 +1111,49 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Rear delts"],
-          "secondaryMuscles": ["Upper back"],
+          "primaryMuscles": [
+            "Rear delts"
+          ],
+          "secondaryMuscles": [
+            "Upper back"
+          ],
           "sets": 3,
-          "reps": { "min": 15, "max": 15, "perSide": false, "label": "15" },
-          "rest": { "seconds": 45, "minSeconds": 45, "maxSeconds": 45, "label": "45 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Pull to the forehead and externally rotate at the end range."],
-          "notes": ""
+          "reps": {
+            "min": 15,
+            "max": 15,
+            "perSide": false,
+            "label": "15"
+          },
+          "rest": {
+            "seconds": 45,
+            "minSeconds": 45,
+            "maxSeconds": 45,
+            "label": "45 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Pull to the forehead and externally rotate at the end range."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like.",
+            "attachments": [
+              "rope",
+              "dual handles"
+            ]
+          }
         }
       ]
     },
-
     {
       "id": "thursday-legs",
       "weekday": 4,
@@ -530,16 +1175,49 @@
           "loadType": "total",
           "loadEntry": "machine",
           "intensityTechniquesAllowed": false,
-          "warmup": { "supported": true, "rampSets": 3 },
+          "warmup": {
+            "supported": true,
+            "rampSets": 3
+          },
           "category": "compound",
-          "primaryMuscles": ["Quads"],
-          "secondaryMuscles": ["Glutes", "Hamstrings"],
+          "primaryMuscles": [
+            "Quads"
+          ],
+          "secondaryMuscles": [
+            "Glutes",
+            "Hamstrings"
+          ],
           "sets": 4,
-          "reps": { "min": 6, "max": 8, "perSide": false, "label": "6-8" },
-          "rest": { "seconds": 150, "minSeconds": 120, "maxSeconds": 180, "label": "2-3 min" },
-          "progression": { "mode": "weight", "increment": { "min": 2.5, "max": 5 }, "label": "+2.5-5 kg" },
-          "cues": ["Back flat on the pad, feet mid-platform at about shoulder width.", "Brace, descend to just past 90 degrees, then drive through the heels."],
-          "notes": "The load is the reading on this machine's sled and is not comparable to a barbell squat."
+          "reps": {
+            "min": 6,
+            "max": 8,
+            "perSide": false,
+            "label": "6-8"
+          },
+          "rest": {
+            "seconds": 150,
+            "minSeconds": 120,
+            "maxSeconds": 180,
+            "label": "2-3 min"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2.5,
+              "max": 5
+            },
+            "label": "+2.5-5 kg"
+          },
+          "cues": [
+            "Back flat on the pad, feet mid-platform at about shoulder width.",
+            "Brace, descend to just past 90 degrees, then drive through the heels."
+          ],
+          "notes": "The load is the reading on this machine's sled and is not comparable to a barbell squat.",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like."
+          }
         },
         {
           "id": "bulgarian-split-squat",
@@ -550,13 +1228,36 @@
           "loadEntry": "total-both",
           "intensityTechniquesAllowed": false,
           "category": "compound",
-          "primaryMuscles": ["Quads"],
-          "secondaryMuscles": ["Glutes"],
+          "primaryMuscles": [
+            "Quads"
+          ],
+          "secondaryMuscles": [
+            "Glutes"
+          ],
           "sets": 3,
-          "reps": { "min": 8, "max": 10, "perSide": true, "label": "8-10/leg" },
-          "rest": { "seconds": 90, "minSeconds": 90, "maxSeconds": 90, "label": "90 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 2, "max": 2.5 }, "label": "+2-2.5 kg" },
-          "cues": ["Keep the torso upright and the front shin roughly vertical."],
+          "reps": {
+            "min": 8,
+            "max": 10,
+            "perSide": true,
+            "label": "8-10/leg"
+          },
+          "rest": {
+            "seconds": 90,
+            "minSeconds": 90,
+            "maxSeconds": 90,
+            "label": "90 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2,
+              "max": 2.5
+            },
+            "label": "+2-2.5 kg"
+          },
+          "cues": [
+            "Keep the torso upright and the front shin roughly vertical."
+          ],
           "notes": ""
         },
         {
@@ -568,14 +1269,42 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": false,
           "category": "compound",
-          "primaryMuscles": ["Quads"],
-          "secondaryMuscles": ["Glutes"],
+          "primaryMuscles": [
+            "Quads"
+          ],
+          "secondaryMuscles": [
+            "Glutes"
+          ],
           "sets": 3,
-          "reps": { "min": 10, "max": 12, "perSide": false, "label": "10-12" },
-          "rest": { "seconds": 90, "minSeconds": 90, "maxSeconds": 90, "label": "90 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 2, "max": 2.5 }, "label": "+2-2.5 kg" },
-          "cues": ["Full range without letting the lower back round off the pad."],
-          "notes": ""
+          "reps": {
+            "min": 10,
+            "max": 12,
+            "perSide": false,
+            "label": "10-12"
+          },
+          "rest": {
+            "seconds": 90,
+            "minSeconds": 90,
+            "maxSeconds": 90,
+            "label": "90 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2,
+              "max": 2.5
+            },
+            "label": "+2-2.5 kg"
+          },
+          "cues": [
+            "Full range without letting the lower back round off the pad."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like."
+          }
         },
         {
           "id": "leg-extension",
@@ -586,14 +1315,40 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Quads"],
+          "primaryMuscles": [
+            "Quads"
+          ],
           "secondaryMuscles": [],
           "sets": 3,
-          "reps": { "min": 12, "max": 15, "perSide": false, "label": "12-15" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Pause briefly at full extension."],
-          "notes": ""
+          "reps": {
+            "min": 12,
+            "max": 15,
+            "perSide": false,
+            "label": "12-15"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Pause briefly at full extension."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like."
+          }
         },
         {
           "id": "standing-calf-raise",
@@ -604,14 +1359,40 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Calves"],
+          "primaryMuscles": [
+            "Calves"
+          ],
           "secondaryMuscles": [],
           "sets": 4,
-          "reps": { "min": 12, "max": 15, "perSide": false, "label": "12-15" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Full stretch at the bottom, hard squeeze at the top."],
-          "notes": ""
+          "reps": {
+            "min": 12,
+            "max": 15,
+            "perSide": false,
+            "label": "12-15"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Full stretch at the bottom, hard squeeze at the top."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like."
+          }
         },
         {
           "id": "cable-crunch",
@@ -622,18 +1403,47 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": true,
           "category": "core",
-          "primaryMuscles": ["Abs"],
+          "primaryMuscles": [
+            "Abs"
+          ],
           "secondaryMuscles": [],
           "sets": 3,
-          "reps": { "min": 12, "max": 15, "perSide": false, "label": "12-15" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Crunch with the abs - the hips stay fixed."],
-          "notes": ""
+          "reps": {
+            "min": 12,
+            "max": 15,
+            "perSide": false,
+            "label": "12-15"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Crunch with the abs - the hips stay fixed."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like.",
+            "attachments": [
+              "rope",
+              "straight bar"
+            ]
+          }
         }
       ]
     },
-
     {
       "id": "friday-recovery",
       "weekday": 5,
@@ -648,7 +1458,6 @@
       ],
       "exercises": []
     },
-
     {
       "id": "saturday-upper",
       "weekday": 6,
@@ -670,15 +1479,42 @@
           "loadType": "total",
           "loadEntry": "plates",
           "intensityTechniquesAllowed": false,
-          "warmup": { "supported": true, "rampSets": 3 },
+          "warmup": {
+            "supported": true,
+            "rampSets": 3
+          },
           "category": "compound",
-          "primaryMuscles": ["Upper chest"],
-          "secondaryMuscles": ["Front delts", "Triceps"],
+          "primaryMuscles": [
+            "Upper chest"
+          ],
+          "secondaryMuscles": [
+            "Front delts",
+            "Triceps"
+          ],
           "sets": 4,
-          "reps": { "min": 6, "max": 8, "perSide": false, "label": "6-8" },
-          "rest": { "seconds": 120, "minSeconds": 120, "maxSeconds": 120, "label": "2 min" },
-          "progression": { "mode": "weight", "increment": { "min": 2.5, "max": 5 }, "label": "+2.5-5 kg" },
-          "cues": ["Set the bench so the bar path lands on the upper chest."],
+          "reps": {
+            "min": 6,
+            "max": 8,
+            "perSide": false,
+            "label": "6-8"
+          },
+          "rest": {
+            "seconds": 120,
+            "minSeconds": 120,
+            "maxSeconds": 120,
+            "label": "2 min"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2.5,
+              "max": 5
+            },
+            "label": "+2.5-5 kg"
+          },
+          "cues": [
+            "Set the bench so the bar path lands on the upper chest."
+          ],
           "notes": ""
         },
         {
@@ -690,14 +1526,49 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": false,
           "category": "compound",
-          "primaryMuscles": ["Mid back"],
-          "secondaryMuscles": ["Lats", "Biceps"],
+          "primaryMuscles": [
+            "Mid back"
+          ],
+          "secondaryMuscles": [
+            "Lats",
+            "Biceps"
+          ],
           "sets": 4,
-          "reps": { "min": 8, "max": 10, "perSide": false, "label": "8-10" },
-          "rest": { "seconds": 120, "minSeconds": 120, "maxSeconds": 120, "label": "2 min" },
-          "progression": { "mode": "weight", "increment": { "min": 2, "max": 2.5 }, "label": "+2-2.5 kg" },
-          "cues": ["Torso stays still - row with the back, not the hips."],
-          "notes": ""
+          "reps": {
+            "min": 8,
+            "max": 10,
+            "perSide": false,
+            "label": "8-10"
+          },
+          "rest": {
+            "seconds": 120,
+            "minSeconds": 120,
+            "maxSeconds": 120,
+            "label": "2 min"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2,
+              "max": 2.5
+            },
+            "label": "+2-2.5 kg"
+          },
+          "cues": [
+            "Torso stays still - row with the back, not the hips."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like.",
+            "attachments": [
+              "close-grip V",
+              "wide bar",
+              "rope",
+              "straight bar"
+            ]
+          }
         },
         {
           "id": "neutral-grip-lat-pulldown",
@@ -708,14 +1579,46 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": false,
           "category": "compound",
-          "primaryMuscles": ["Lats"],
-          "secondaryMuscles": ["Biceps"],
+          "primaryMuscles": [
+            "Lats"
+          ],
+          "secondaryMuscles": [
+            "Biceps"
+          ],
           "sets": 3,
-          "reps": { "min": 10, "max": 12, "perSide": false, "label": "10-12" },
-          "rest": { "seconds": 90, "minSeconds": 90, "maxSeconds": 90, "label": "90 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 2, "max": 2.5 }, "label": "+2-2.5 kg" },
-          "cues": ["Drive the elbows down and back."],
-          "notes": ""
+          "reps": {
+            "min": 10,
+            "max": 12,
+            "perSide": false,
+            "label": "10-12"
+          },
+          "rest": {
+            "seconds": 90,
+            "minSeconds": 90,
+            "maxSeconds": 90,
+            "label": "90 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2,
+              "max": 2.5
+            },
+            "label": "+2-2.5 kg"
+          },
+          "cues": [
+            "Drive the elbows down and back."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like.",
+            "attachments": [
+              "neutral bar",
+              "V-handle"
+            ]
+          }
         },
         {
           "id": "machine-shoulder-press",
@@ -726,14 +1629,42 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": false,
           "category": "compound",
-          "primaryMuscles": ["Front delts"],
-          "secondaryMuscles": ["Triceps"],
+          "primaryMuscles": [
+            "Front delts"
+          ],
+          "secondaryMuscles": [
+            "Triceps"
+          ],
           "sets": 3,
-          "reps": { "min": 8, "max": 10, "perSide": false, "label": "8-10" },
-          "rest": { "seconds": 90, "minSeconds": 90, "maxSeconds": 90, "label": "90 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 2, "max": 2.5 }, "label": "+2-2.5 kg" },
-          "cues": ["Keep the ribs down - don't arch to move the weight."],
-          "notes": ""
+          "reps": {
+            "min": 8,
+            "max": 10,
+            "perSide": false,
+            "label": "8-10"
+          },
+          "rest": {
+            "seconds": 90,
+            "minSeconds": 90,
+            "maxSeconds": 90,
+            "label": "90 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2,
+              "max": 2.5
+            },
+            "label": "+2-2.5 kg"
+          },
+          "cues": [
+            "Keep the ribs down - don't arch to move the weight."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like."
+          }
         },
         {
           "id": "cable-lateral-raise",
@@ -744,19 +1675,59 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Side delts"],
+          "primaryMuscles": [
+            "Side delts"
+          ],
           "secondaryMuscles": [],
           "sets": 3,
-          "reps": { "min": 8, "max": 12, "perSide": true, "label": "12/10/8" },
+          "reps": {
+            "min": 8,
+            "max": 12,
+            "perSide": true,
+            "label": "12/10/8"
+          },
           "setPlan": [
-            { "weightKg": 10, "reps": 12 },
-            { "weightKg": 15, "reps": 10 },
-            { "weightKg": 20, "reps": 8 }
+            {
+              "weightKg": 10,
+              "reps": 12
+            },
+            {
+              "weightKg": 15,
+              "reps": 10
+            },
+            {
+              "weightKg": 20,
+              "reps": 8
+            }
           ],
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Cable behind the body, lead with the elbow.", "Constant tension - no swinging."],
-          "notes": "Ascending ladder: 10 kg x 12, 15 kg x 10, 20 kg x 8. Each rung progresses on its own; the whole ladder moves up once every rung hits its target."
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Cable behind the body, lead with the elbow.",
+            "Constant tension - no swinging."
+          ],
+          "notes": "Ascending ladder: 10 kg x 12, 15 kg x 10, 20 kg x 8. Each rung progresses on its own; the whole ladder moves up once every rung hits its target.",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like.",
+            "attachments": [
+              "single handle",
+              "D-handle"
+            ]
+          }
         },
         {
           "id": "reverse-pec-deck",
@@ -767,14 +1738,42 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Rear delts"],
-          "secondaryMuscles": ["Upper back"],
+          "primaryMuscles": [
+            "Rear delts"
+          ],
+          "secondaryMuscles": [
+            "Upper back"
+          ],
           "sets": 3,
-          "reps": { "min": 12, "max": 15, "perSide": false, "label": "12-15" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Sweep wide with soft elbows, squeeze the rear delts."],
-          "notes": ""
+          "reps": {
+            "min": 12,
+            "max": 15,
+            "perSide": false,
+            "label": "12-15"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Sweep wide with soft elbows, squeeze the rear delts."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like."
+          }
         },
         {
           "id": "ez-bar-curl",
@@ -785,13 +1784,36 @@
           "loadEntry": "plates",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Biceps"],
-          "secondaryMuscles": ["Forearms"],
+          "primaryMuscles": [
+            "Biceps"
+          ],
+          "secondaryMuscles": [
+            "Forearms"
+          ],
           "sets": 3,
-          "reps": { "min": 10, "max": 12, "perSide": false, "label": "10-12" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Elbows pinned at your sides - no swinging."],
+          "reps": {
+            "min": 10,
+            "max": 12,
+            "perSide": false,
+            "label": "10-12"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Elbows pinned at your sides - no swinging."
+          ],
           "notes": ""
         },
         {
@@ -803,18 +1825,38 @@
           "loadEntry": "plates",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Triceps"],
+          "primaryMuscles": [
+            "Triceps"
+          ],
           "secondaryMuscles": [],
           "sets": 3,
-          "reps": { "min": 10, "max": 12, "perSide": false, "label": "10-12" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Lower behind the forehead and keep the elbows from flaring."],
+          "reps": {
+            "min": 10,
+            "max": 12,
+            "perSide": false,
+            "label": "10-12"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Lower behind the forehead and keep the elbows from flaring."
+          ],
           "notes": ""
         }
       ]
     },
-
     {
       "id": "sunday-posterior-chain",
       "weekday": 7,
@@ -837,15 +1879,43 @@
           "loadEntry": "plates",
           "intensityTechniquesAllowed": false,
           "barWeightKg": 20,
-          "warmup": { "supported": true, "rampSets": 3 },
+          "warmup": {
+            "supported": true,
+            "rampSets": 3
+          },
           "category": "compound",
-          "primaryMuscles": ["Hamstrings"],
-          "secondaryMuscles": ["Glutes", "Lower back"],
+          "primaryMuscles": [
+            "Hamstrings"
+          ],
+          "secondaryMuscles": [
+            "Glutes",
+            "Lower back"
+          ],
           "sets": 4,
-          "reps": { "min": 6, "max": 8, "perSide": false, "label": "6-8" },
-          "rest": { "seconds": 150, "minSeconds": 120, "maxSeconds": 180, "label": "2-3 min" },
-          "progression": { "mode": "weight", "increment": { "min": 2.5, "max": 5 }, "label": "+2.5-5 kg" },
-          "cues": ["Push the hips back and keep the bar close to the legs.", "Neutral spine - never round the back."],
+          "reps": {
+            "min": 6,
+            "max": 8,
+            "perSide": false,
+            "label": "6-8"
+          },
+          "rest": {
+            "seconds": 150,
+            "minSeconds": 120,
+            "maxSeconds": 180,
+            "label": "2-3 min"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2.5,
+              "max": 5
+            },
+            "label": "+2.5-5 kg"
+          },
+          "cues": [
+            "Push the hips back and keep the bar close to the legs.",
+            "Neutral spine - never round the back."
+          ],
           "notes": ""
         },
         {
@@ -858,13 +1928,36 @@
           "intensityTechniquesAllowed": false,
           "barWeightKg": 20,
           "category": "compound",
-          "primaryMuscles": ["Glutes"],
-          "secondaryMuscles": ["Hamstrings"],
+          "primaryMuscles": [
+            "Glutes"
+          ],
+          "secondaryMuscles": [
+            "Hamstrings"
+          ],
           "sets": 3,
-          "reps": { "min": 8, "max": 10, "perSide": false, "label": "8-10" },
-          "rest": { "seconds": 120, "minSeconds": 120, "maxSeconds": 120, "label": "2 min" },
-          "progression": { "mode": "weight", "increment": { "min": 2, "max": 2.5 }, "label": "+2-2.5 kg" },
-          "cues": ["Tuck the chin, finish with a hard glute squeeze - don't hyperextend."],
+          "reps": {
+            "min": 8,
+            "max": 10,
+            "perSide": false,
+            "label": "8-10"
+          },
+          "rest": {
+            "seconds": 120,
+            "minSeconds": 120,
+            "maxSeconds": 120,
+            "label": "2 min"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2,
+              "max": 2.5
+            },
+            "label": "+2-2.5 kg"
+          },
+          "cues": [
+            "Tuck the chin, finish with a hard glute squeeze - don't hyperextend."
+          ],
           "notes": ""
         },
         {
@@ -876,14 +1969,40 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Hamstrings"],
+          "primaryMuscles": [
+            "Hamstrings"
+          ],
           "secondaryMuscles": [],
           "sets": 3,
-          "reps": { "min": 10, "max": 12, "perSide": false, "label": "10-12" },
-          "rest": { "seconds": 90, "minSeconds": 90, "maxSeconds": 90, "label": "90 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Keep the hips down on the pad throughout."],
-          "notes": ""
+          "reps": {
+            "min": 10,
+            "max": 12,
+            "perSide": false,
+            "label": "10-12"
+          },
+          "rest": {
+            "seconds": 90,
+            "minSeconds": 90,
+            "maxSeconds": 90,
+            "label": "90 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Keep the hips down on the pad throughout."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like."
+          }
         },
         {
           "id": "walking-lunges",
@@ -894,13 +2013,37 @@
           "loadEntry": "total-both",
           "intensityTechniquesAllowed": false,
           "category": "compound",
-          "primaryMuscles": ["Quads"],
-          "secondaryMuscles": ["Glutes", "Hamstrings"],
+          "primaryMuscles": [
+            "Quads"
+          ],
+          "secondaryMuscles": [
+            "Glutes",
+            "Hamstrings"
+          ],
           "sets": 3,
-          "reps": { "min": 10, "max": 10, "perSide": true, "label": "10/leg" },
-          "rest": { "seconds": 90, "minSeconds": 90, "maxSeconds": 90, "label": "90 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 2, "max": 2.5 }, "label": "+2-2.5 kg" },
-          "cues": ["Long strides, torso tall, knee tracking over the mid-foot."],
+          "reps": {
+            "min": 10,
+            "max": 10,
+            "perSide": true,
+            "label": "10/leg"
+          },
+          "rest": {
+            "seconds": 90,
+            "minSeconds": 90,
+            "maxSeconds": 90,
+            "label": "90 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 2,
+              "max": 2.5
+            },
+            "label": "+2-2.5 kg"
+          },
+          "cues": [
+            "Long strides, torso tall, knee tracking over the mid-foot."
+          ],
           "notes": ""
         },
         {
@@ -912,14 +2055,40 @@
           "loadEntry": "machine",
           "intensityTechniquesAllowed": true,
           "category": "isolation",
-          "primaryMuscles": ["Calves"],
+          "primaryMuscles": [
+            "Calves"
+          ],
           "secondaryMuscles": [],
           "sets": 4,
-          "reps": { "min": 12, "max": 15, "perSide": false, "label": "12-15" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
-          "progression": { "mode": "weight", "increment": { "min": 1, "max": 2 }, "label": "+1-2 kg" },
-          "cues": ["Slow eccentric, full stretch at the bottom."],
-          "notes": ""
+          "reps": {
+            "min": 12,
+            "max": 15,
+            "perSide": false,
+            "label": "12-15"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
+          "progression": {
+            "mode": "weight",
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
+            "label": "+1-2 kg"
+          },
+          "cues": [
+            "Slow eccentric, full stretch at the bottom."
+          ],
+          "notes": "",
+          "loadContext": {
+            "supported": true,
+            "machineLabel": "Machine",
+            "note": "The reading on this machine. Tag which machine it was so the history compares like with like."
+          }
         },
         {
           "id": "ab-wheel-rollout",
@@ -930,28 +2099,213 @@
           "loadEntry": "bodyweight-plus-added",
           "intensityTechniquesAllowed": true,
           "category": "core",
-          "primaryMuscles": ["Abs"],
-          "secondaryMuscles": ["Lower back"],
+          "primaryMuscles": [
+            "Abs"
+          ],
+          "secondaryMuscles": [
+            "Lower back"
+          ],
           "sets": 3,
-          "reps": { "min": 10, "max": 12, "perSide": false, "label": "10-12" },
-          "rest": { "seconds": 60, "minSeconds": 60, "maxSeconds": 60, "label": "60 sec" },
+          "reps": {
+            "min": 10,
+            "max": 12,
+            "perSide": false,
+            "label": "10-12"
+          },
+          "rest": {
+            "seconds": 60,
+            "minSeconds": 60,
+            "maxSeconds": 60,
+            "label": "60 sec"
+          },
           "progression": {
             "mode": "difficulty-first",
-            "increment": { "min": 1, "max": 2 },
+            "increment": {
+              "min": 1,
+              "max": 2
+            },
             "label": "reps, then difficulty",
             "summary": "Build clean reps -> improve control/range -> increase difficulty -> optional external resistance.",
             "difficultyLadder": [
-              { "id": "standard", "label": "Standard", "note": "Controlled rollout, ribs down, no sag through the lower back." },
-              { "id": "slow-eccentric", "label": "Slow eccentric", "note": "Take 3-4 seconds rolling out. Same reps, far more control." },
-              { "id": "longer-rom", "label": "Longer range", "note": "Roll further out while keeping the ribs down and the hips locked." },
-              { "id": "advanced", "label": "Advanced variation", "note": "From the feet rather than the knees, or a standing rollout." },
-              { "id": "weighted", "label": "Weighted", "note": "Only now consider external resistance." }
+              {
+                "id": "standard",
+                "label": "Standard",
+                "note": "Controlled rollout, ribs down, no sag through the lower back."
+              },
+              {
+                "id": "slow-eccentric",
+                "label": "Slow eccentric",
+                "note": "Take 3-4 seconds rolling out. Same reps, far more control."
+              },
+              {
+                "id": "longer-rom",
+                "label": "Longer range",
+                "note": "Roll further out while keeping the ribs down and the hips locked."
+              },
+              {
+                "id": "advanced",
+                "label": "Advanced variation",
+                "note": "From the feet rather than the knees, or a standing rollout."
+              },
+              {
+                "id": "weighted",
+                "label": "Weighted",
+                "note": "Only now consider external resistance."
+              }
             ]
           },
-          "cues": ["Keep the ribs down and the hips from sagging."],
+          "cues": [
+            "Keep the ribs down and the hips from sagging."
+          ],
           "notes": ""
         }
       ]
+    }
+  ],
+  "substituteExercises": [
+    {
+      "_note": "Performed in place of a planned movement. Not prescribed anywhere and never appears in a day; it exists so a substituted entry has a name, a loading convention and a rep range of its own.",
+      "id": "bar-triceps-pushdown",
+      "substituteFor": "rope-triceps-pushdown",
+      "name": "Bar Triceps Pushdown",
+      "equipment": "cable",
+      "loadType": "total",
+      "loadEntry": "machine",
+      "intensityTechniquesAllowed": true,
+      "category": "isolation",
+      "primaryMuscles": [
+        "Triceps"
+      ],
+      "secondaryMuscles": [],
+      "sets": 3,
+      "reps": {
+        "min": 10,
+        "max": 12,
+        "perSide": false,
+        "label": "10-12"
+      },
+      "rest": {
+        "seconds": 60,
+        "minSeconds": 60,
+        "maxSeconds": 60,
+        "label": "60 sec"
+      },
+      "progression": {
+        "mode": "weight",
+        "increment": {
+          "min": 1,
+          "max": 2
+        },
+        "label": "+1-2 kg"
+      },
+      "loadContext": {
+        "supported": true,
+        "machineLabel": "Machine",
+        "attachments": [
+          "straight bar",
+          "V-bar",
+          "EZ bar"
+        ],
+        "note": "The reading on this machine."
+      },
+      "cues": [
+        "Elbows pinned to your sides, wrists neutral."
+      ],
+      "notes": "Substitute for the rope pushdown. Same movement, different attachment - the stack reading is not comparable, so it progresses on its own."
+    },
+    {
+      "id": "overhead-bar-extension",
+      "substituteFor": "overhead-rope-extension",
+      "name": "Overhead Bar Extension",
+      "equipment": "cable",
+      "loadType": "total",
+      "loadEntry": "machine",
+      "intensityTechniquesAllowed": true,
+      "category": "isolation",
+      "primaryMuscles": [
+        "Triceps"
+      ],
+      "secondaryMuscles": [],
+      "sets": 3,
+      "reps": {
+        "min": 10,
+        "max": 12,
+        "perSide": false,
+        "label": "10-12"
+      },
+      "rest": {
+        "seconds": 60,
+        "minSeconds": 60,
+        "maxSeconds": 60,
+        "label": "60 sec"
+      },
+      "progression": {
+        "mode": "weight",
+        "increment": {
+          "min": 1,
+          "max": 2
+        },
+        "label": "+1-2 kg"
+      },
+      "loadContext": {
+        "supported": true,
+        "machineLabel": "Machine",
+        "attachments": [
+          "EZ bar",
+          "straight bar"
+        ],
+        "note": "The reading on this machine."
+      },
+      "cues": [
+        "Elbows high and close, full stretch at the bottom."
+      ],
+      "notes": "Substitute for the overhead rope extension."
+    },
+    {
+      "id": "pec-deck-fly",
+      "substituteFor": "low-to-high-cable-fly",
+      "name": "Pec Deck Fly",
+      "equipment": "machine",
+      "loadType": "total",
+      "loadEntry": "machine",
+      "intensityTechniquesAllowed": true,
+      "category": "isolation",
+      "primaryMuscles": [
+        "Mid chest"
+      ],
+      "secondaryMuscles": [
+        "Front delts"
+      ],
+      "sets": 3,
+      "reps": {
+        "min": 12,
+        "max": 15,
+        "perSide": false,
+        "label": "12-15"
+      },
+      "rest": {
+        "seconds": 60,
+        "minSeconds": 60,
+        "maxSeconds": 60,
+        "label": "60 sec"
+      },
+      "progression": {
+        "mode": "weight",
+        "increment": {
+          "min": 1,
+          "max": 2
+        },
+        "label": "+1-2 kg"
+      },
+      "loadContext": {
+        "supported": true,
+        "machineLabel": "Machine",
+        "note": "The reading on this machine."
+      },
+      "cues": [
+        "Soft fixed elbows, squeeze at the middle."
+      ],
+      "notes": "Substitute for the low-to-high cable fly when the cable station is taken."
     }
   ]
 }

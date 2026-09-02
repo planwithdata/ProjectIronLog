@@ -8,8 +8,11 @@
  *     status: 'in-progress' | 'completed',
  *     startedAt, completedAt,             // ISO instants, for duration
  *     week, waveWeek, isDeload,           // wave position, frozen at start
+ *     schedule: {                         // planned day vs actual day
+ *       status, offsetDays, scheduledWeekday, scheduledDate,
+ *     },
  *     entries: [{
- *       exerciseId,                       // links back to workouts.json
+ *       exerciseId,                       // the PLANNED slot in workouts.json
  *       targetWeightKg, targetReps,       // what the engine prescribed
  *       setModel: 'v2' | 'legacy',
  *       sets: [{ weightKg, reps, completed, rpe, kind }],   // WORKING SETS
@@ -17,9 +20,25 @@
  *       intensitySets: [{ id, type, stages: [...] }],       // drop / failure
  *       pain: null | { score, location, note, action, alternativeId },
  *       difficulty: null | string,
+ *       context: null | { machineId, label, attachment, note },
+ *       substitution: null | { performedId, label, comparableLoad, note },
  *       notes,
  *     }],
  *   }
+ *
+ * `dayId` is the workout that was *performed*, and `date` is when. Those two
+ * are enough to say where a session sits against the split, so `schedule` is
+ * derived rather than authoritative — `getSchedule` recomputes it for any
+ * session, including every one logged before the field existed. That is what
+ * makes "I missed Tuesday and did chest on Wednesday" a first-class outcome
+ * instead of a missed session plus a mystery.
+ *
+ * `entry.exerciseId` remains the planned slot even when something else was
+ * performed; `entry.substitution.performedId` says what that was. Keeping the
+ * slot is what preserves adherence — a bar pushdown in the rope pushdown's
+ * place is a completed exercise, not a skipped one — and keeping the performed
+ * id separate is what stops two incomparable stack readings landing in one
+ * load series.
  *
  * A session stores exercise *ids*, never names or prescriptions by value, so
  * that replacing workouts.json cannot orphan history. It does keep the
@@ -47,11 +66,23 @@ import * as trainingPrefs from './training-prefs-service.js';
 import { recommend, isEntryComplete, earnedAdvance } from '../engine/progression.js';
 import { volumeMultiplier } from '../engine/loading.js';
 import {
-  SET_KIND, INTENSITY_TYPE, PAIN_ACTION,
-  normalizeEntry, workingSets, completedWorkingSets, warmupSets,
-  completedWarmupSets, intensitySequences, completedIntensityStages,
-  isLegacyEntry, isPainLimited, composition, entryVolume, rampSets as buildRampSets,
+  SET_KIND,
+  INTENSITY_TYPE,
+  PAIN_ACTION,
+  normalizeEntry,
+  workingSets,
+  completedWorkingSets,
+  warmupSets,
+  completedWarmupSets,
+  intensitySequences,
+  isLegacyEntry,
+  isPainLimited,
+  composition,
+  entryVolume,
+  rampSets as buildRampSets,
+  repeatableSets,
 } from '../engine/set-model.js';
+import { contextKey, describeContext } from '../engine/context.js';
 
 /* --- Reads -------------------------------------------------------------- */
 
@@ -106,7 +137,7 @@ export function getExerciseHistory(exerciseId, limit = 10) {
   const prescribed = exercise?.sets ?? 0;
 
   for (const session of getCompletedSessions()) {
-    const raw = session.entries.find((item) => item.exerciseId === exerciseId);
+    const raw = findEntryFor(session, exerciseId);
     if (!raw) continue;
     const entry = normalizeEntry(raw);
 
@@ -119,12 +150,22 @@ export function getExerciseHistory(exerciseId, limit = 10) {
     // information. It is skipped only when there is genuinely nothing in it.
     if (!done.length && !warmups.length && !intensity.length && !entry.pain) continue;
 
+    const substitution = entry.substitution ?? null;
+    // Asking for the planned slot while a stand-in was performed, or the other
+    // way round. Both readings are legitimate and they are not the same
+    // question, so each says which one it answered.
+    const substituted = Boolean(substitution) && substitution.performedId !== exerciseId;
+
     history.push({
       sessionId: session.id,
       date: session.date,
       week: session.week,
+      waveWeek: session.waveWeek ?? null,
+      dayId: session.dayId,
       isDeload: session.isDeload,
+      schedule: getSchedule(session),
       targetWeightKg: entry.targetWeightKg ?? null,
+      plannedAction: entry.plannedAction ?? null,
       sets: done,
       warmupSets: warmups,
       intensitySets: intensity,
@@ -134,10 +175,40 @@ export function getExerciseHistory(exerciseId, limit = 10) {
       difficulty: entry.difficulty ?? null,
       legacy: isLegacyEntry(entry),
       notes: entry.notes ?? '',
+      // Load-comparison identity. `contextKey` reads both fields, so a machine
+      // tag and a substitution both land in it and the engine needs to know
+      // about neither individually.
+      context: entry.context ?? null,
+      contextLabel: describeContext(entry),
+      contextKey: contextKey(entry),
+      substitution,
+      substituted,
+      plannedExerciseId: entry.exerciseId,
+      performedExerciseId: substitution?.performedId ?? entry.exerciseId,
     });
     if (history.length >= limit) break;
   }
   return history;
+}
+
+/**
+ * The entry in a session that answers for `exerciseId`.
+ *
+ * Usually the one filed under that id. The second lookup is for a stand-in: ask
+ * for the bar pushdown and you get the rope pushdown's slot on the day the bar
+ * was actually used, because that is where that work is recorded. Without it a
+ * substitute would have a name and a loading convention but never any history.
+ */
+function findEntryFor(session, exerciseId) {
+  const direct = session.entries.find((item) => item.exerciseId === exerciseId);
+  if (direct && !(direct.substitution && direct.substitution.performedId !== exerciseId)) {
+    return direct;
+  }
+
+  const performed = session.entries.find(
+    (item) => item.substitution?.performedId === exerciseId
+  );
+  return performed ?? direct ?? null;
 }
 
 /** The single most recent completed performance of an exercise. */
@@ -172,6 +243,71 @@ export function baselineSetIndex(dayKey = today(), rule = WORKING_SET_REBASELINE
   return since < rule.sessions ? rule.setIndex : null;
 }
 
+/* --- Schedule: planned day vs actual day -------------------------------
+   A session knows which workout it was (`dayId`) and when it happened
+   (`date`). Everything about being early, late or on time follows from those
+   two, so it is derived here rather than trusted from storage — which is what
+   makes it correct for the eighteen sessions logged before the idea existed.
+   ====================================================================== */
+
+/**
+ * Where one session sits against its scheduled day.
+ *
+ * Prefers the reading frozen at start, because that is what the app told the
+ * user at the time, and falls back to recomputing it. The recomputation is the
+ * same function, so the two can never disagree except by the program's own
+ * weekdays having been edited since — in which case the frozen copy is the
+ * honest one.
+ */
+export function getSchedule(session) {
+  if (!session) return null;
+  if (session.schedule?.status) return session.schedule;
+  return programService.getScheduleFit(session.dayId, session.date);
+}
+
+/** Was this workout performed on a day other than the one it is scheduled on? */
+export function isOffSchedule(session) {
+  const schedule = getSchedule(session);
+  return Boolean(schedule) && schedule.status !== programService.SCHEDULE_STATUS.ON_DAY;
+}
+
+/**
+ * Training days that could be started today, most likely first, each annotated
+ * with how it would sit against the schedule and when it was last done.
+ *
+ * This is what the "do a different workout" picker renders. It lists the whole
+ * split rather than only the ones behind: the point of the feature is that any
+ * day can be done on any day, and a picker that decides for you which ones are
+ * allowed is the problem it was built to fix.
+ */
+export function getStartableDays(dayKey = today()) {
+  return programService.getTrainingDaysFrom(dayKey).map((day) => {
+    const last = getLastSessionForDay(day.id);
+    const fit = programService.getScheduleFit(day.id, dayKey);
+    const doneThisWeek = completedThisWeek(day.id, dayKey);
+
+    return {
+      day,
+      fit,
+      lastDate: last?.date ?? null,
+      daysSince: last ? daysBetween(last.date, dayKey) : null,
+      doneThisWeek,
+      // The one thing worth flagging: its day has passed this week and it has
+      // not been done. Not a warning, a shortcut.
+      overdueThisWeek: !doneThisWeek && fit.offsetDays > 0,
+      exercises: programService.getWorkingExercises(day).length,
+    };
+  });
+}
+
+/** Has this training day already been completed in the ISO week containing `dayKey`? */
+export function completedThisWeek(dayId, dayKey = today()) {
+  const monday = addDays(dayKey, -(isoWeekday(dayKey) - 1));
+  const sunday = addDays(monday, 6);
+  return getCompletedSessions().some((session) =>
+    session.dayId === dayId && session.date >= monday && session.date <= sunday);
+}
+
 /* --- Session lifecycle -------------------------------------------------- */
 
 /**
@@ -189,6 +325,16 @@ export async function startSession(dayId, dayKey = today()) {
 
   const wave = programService.getTrainingWeek(dayKey);
 
+  // Any day's workout may be started on any day. What the app owes the user in
+  // return is a record of the difference: this session is Tuesday Chest,
+  // performed on Wednesday, one day late — not a Wednesday session that has
+  // mysteriously grown a bench press.
+  const fit = programService.getScheduleFit(dayId, dayKey);
+  const schedule = completedThisWeek(dayId, dayKey)
+    ? { ...fit, status: programService.SCHEDULE_STATUS.EXTRA,
+        label: programService.describeScheduleFit(programService.SCHEDULE_STATUS.EXTRA, fit.offsetDays) }
+    : fit;
+
   const session = await db.insert(COLLECTIONS.SESSIONS, {
     dayId,
     date: dayKey,
@@ -198,6 +344,7 @@ export async function startSession(dayId, dayKey = today()) {
     week: wave.week,
     waveWeek: wave.waveWeek,
     isDeload: wave.isDeload,
+    schedule,
     entries: day.exercises
       // The pre-workout warm-up is a preference, so an entry for it is only
       // created when it is switched on. Turning it off later leaves the
@@ -239,6 +386,8 @@ function buildEntry(exercise, wave, dayKey = today()) {
       intensitySets: [],
       pain: null,
       difficulty: null,
+      context: null,
+      substitution: null,
       notes: '',
     };
   }
@@ -247,11 +396,20 @@ function buildEntry(exercise, wave, dayKey = today()) {
     ? programService.deloadSets(exercise.sets)
     : exercise.sets;
 
+  // Carried forward from the last time this movement was logged, because the
+  // machine you used last week is overwhelmingly the one you are about to use
+  // again. Pre-filling it is what makes tagging cost nothing in the normal
+  // case; it is editable in one tap when the machine is taken.
+  const context = programService.supportsLoadContext(exercise)
+    ? (history.find((item) => item.context)?.context ?? null)
+    : null;
+
   const plan = recommend(exercise, history, {
     isDeload: wave.isDeload,
     setCount,
     loadPrefs,
     baselineSetIndex: baselineSetIndex(dayKey),
+    contextKey: contextKey({ context }),
   });
 
   return {
@@ -261,6 +419,8 @@ function buildEntry(exercise, wave, dayKey = today()) {
     plannedAction: plan.action,
     planReason: plan.reason,
     setModel: 'v2',
+    context,
+    substitution: null,
     // Each slot is pre-filled with the recommended load and rep target so the
     // common case is one tap on the checkmark, not four fields of typing.
     // A pyramid supplies a load per set; everything else shares one.
@@ -322,17 +482,157 @@ function blankWarmupRows(count, reps) {
  * The engine's current recommendation for an exercise, ignoring any session
  * in progress. Used by the read-only program browser and by reports.
  */
-export function getRecommendation(exercise, dayKey = today()) {
+export function getRecommendation(exercise, dayKey = today(), options = {}) {
   const wave = programService.getTrainingWeek(dayKey);
   const setCount = wave.isDeload
     ? programService.deloadSets(exercise.sets)
     : exercise.sets;
-  return recommend(exercise, getExerciseHistory(exercise.id, 6), {
+  const history = getExerciseHistory(exercise.id, 6);
+
+  // Same carry-forward as `buildEntry`, so the browse view and the session it
+  // starts show the same load rather than differing by a machine tag.
+  const context = options.context
+    ?? (programService.supportsLoadContext(exercise)
+      ? (history.find((item) => item.context)?.context ?? null)
+      : null);
+
+  return recommend(exercise, history, {
     isDeload: wave.isDeload,
     setCount,
     loadPrefs: trainingPrefs.getLoadPrefs(),
     baselineSetIndex: baselineSetIndex(dayKey),
+    contextKey: contextKey({ context }),
   });
+}
+
+/* --- Load context: which machine these numbers came off ----------------
+   The stored number never changes and is never converted. What is recorded
+   alongside it is which stack produced it, so the app can compare like with
+   like instead of reading a walk across the gym floor as a strength gain.
+   ====================================================================== */
+
+/**
+ * Tag (or re-tag) the machine and attachment an entry is being performed on.
+ *
+ * Re-running the recommendation is deliberately *not* done here. The
+ * prescription is frozen at the start of a session on purpose — a target that
+ * shifts under the user between sets is worse than one that is slightly stale —
+ * and the workout screen surfaces the re-anchored suggestion as a prompt rather
+ * than silently rewriting the card.
+ *
+ * @param {object|null} context  { machineId, label, attachment, note }
+ */
+export async function setEntryContext(sessionId, exerciseId, context) {
+  return patchEntry(sessionId, exerciseId, (entry) => ({
+    ...entry,
+    context: context === null ? null : {
+      machineId: slug(context.machineId ?? context.label),
+      label: String(context.label ?? '').slice(0, 60).trim() || null,
+      attachment: String(context.attachment ?? '').slice(0, 60).trim() || null,
+      note: String(context.note ?? '').slice(0, 200).trim() || null,
+    },
+  }));
+}
+
+export async function clearEntryContext(sessionId, exerciseId) {
+  return setEntryContext(sessionId, exerciseId, null);
+}
+
+/**
+ * Machine tags this exercise has actually been logged against, newest first.
+ *
+ * Derived from the log rather than kept in a registry: the list of machines in
+ * one gym is exactly the list of machines that appear in the history, and a
+ * separate table of them would be one more thing to keep in step.
+ */
+export function getKnownContexts(exerciseId) {
+  const seen = new Map();
+
+  for (const session of getCompletedSessions()) {
+    for (const entry of session.entries) {
+      if (entry.exerciseId !== exerciseId && entry.substitution?.performedId !== exerciseId) continue;
+      const context = entry.context;
+      if (!context) continue;
+      const key = contextKey({ context });
+      if (seen.has(key)) continue;
+      seen.set(key, { ...context, key, lastUsed: session.date });
+    }
+  }
+
+  return [...seen.values()];
+}
+
+/* --- Substitution ------------------------------------------------------
+   Performing a different movement in a planned slot. The slot keeps its
+   adherence — this is a completed exercise, not a skipped one — and the
+   performed movement keeps its own load series, because a rope and a bar on
+   the same stack are two scales.
+   ====================================================================== */
+
+/**
+ * Record that `substituteId` was performed in `exerciseId`'s slot.
+ *
+ * `entry.exerciseId` is left pointing at the planned movement. That is the
+ * load-bearing choice: it is what keeps the session's completion, its day, its
+ * volume and its adherence attached to the program, and it means dropping the
+ * substitution later restores the original reading exactly.
+ */
+export async function substituteEntry(sessionId, exerciseId, substituteId) {
+  const exercise = programService.getExercise(exerciseId);
+  const option = programService.getSubstitution(exercise, substituteId);
+  if (!option) {
+    throw new Error('That is not a substitution this exercise offers.');
+  }
+  const performed = programService.getExercise(substituteId);
+
+  return patchEntry(sessionId, exerciseId, (entry) => ({
+    ...entry,
+    substitution: {
+      performedId: substituteId,
+      label: option.label ?? performed?.name ?? substituteId,
+      comparableLoad: programService.substitutionComparesLoad(option),
+      note: option.note ?? null,
+      loggedAt: new Date().toISOString(),
+    },
+  }));
+}
+
+export async function clearSubstitution(sessionId, exerciseId) {
+  return patchEntry(sessionId, exerciseId, (entry) => ({ ...entry, substitution: null }));
+}
+
+/**
+ * The movement an entry actually trained, which is the substitute where there
+ * is one and the planned exercise otherwise. Every read path that wants to know
+ * "what was this set *of*" goes through here.
+ */
+export function performedExercise(entry) {
+  const id = entry?.substitution?.performedId ?? entry?.exerciseId;
+  return programService.getExercise(id) ?? null;
+}
+
+/* --- Top sets -----------------------------------------------------------
+   A heavier single taken above the working load. Real training, on the
+   record, in the heaviest-weight PR — and kept out of the load the next
+   session is built from, because it is a probe rather than a load you repeat.
+   ====================================================================== */
+
+/**
+ * Mark or unmark one working set as a heavier top set.
+ *
+ * Toggling this does not move the set, change its load or its reps, or
+ * reorder anything: it changes one label, and what that label changes is
+ * whether `progression.repeatableLoad` counts the set when deciding what to
+ * prescribe next time.
+ */
+export async function setTopSet(sessionId, exerciseId, setIndex, isTop) {
+  return patchEntry(sessionId, exerciseId, (entry) => ({
+    ...entry,
+    sets: entry.sets.map((set, index) =>
+      (index === setIndex
+        ? { ...set, kind: isTop ? SET_KIND.TOP : SET_KIND.WORKING }
+        : set)),
+  }));
 }
 
 /** Patch one entry of an in-progress session. */
@@ -421,12 +721,14 @@ export async function addSet(sessionId, exerciseId) {
 
   const entries = session.entries.map((entry) => {
     if (entry.exerciseId !== exerciseId) return entry;
-    const last = entry.sets[entry.sets.length - 1];
+    const last = [...entry.sets].reverse().find((set) => set.kind !== SET_KIND.TOP)
+      ?? entry.sets[entry.sets.length - 1];
     return {
       ...entry,
       sets: [...entry.sets, {
-        // Carry the last set's load forward; a new set is almost never a
-        // different weight, and an empty field is one more thing to type.
+        // Carry the last *working* set's load forward; a new set is almost
+        // never a different weight, and an empty field is one more thing to
+        // type. A top set is not the load to inherit — it was a probe.
         weightKg: last?.weightKg ?? entry.targetWeightKg ?? null,
         reps: last?.reps ?? null,
         completed: false,
@@ -555,7 +857,7 @@ export async function suggestWarmup(sessionId, exerciseId) {
  * identical in the data. This is how the user tells it — one decision per set,
  * made deliberately, never inferred.
  *
- * @param {Array<'warmup'|'working'|'drop'>} kinds  one per existing set, in order
+ * @param {Array<'warmup'|'working'|'top'|'drop'>} kinds  one per set, in order
  */
 export async function reclassifyLegacySets(sessionId, exerciseId, kinds) {
   return patchEntry(sessionId, exerciseId, (entry) => {
@@ -572,6 +874,10 @@ export async function reclassifyLegacySets(sessionId, exerciseId, kinds) {
         warmup.push({ ...set, kind: SET_KIND.WARMUP });
       } else if (kind === SET_KIND.DROP) {
         dropped.push({ ...set, kind: SET_KIND.DROP, toFailure: false });
+      } else if (kind === SET_KIND.TOP) {
+        // Stays in `sets`, in place: a top set is a working set that happened
+        // to be heavier, and moving it would rewrite the order it was done in.
+        working.push({ ...set, kind: SET_KIND.TOP });
       } else {
         working.push({ ...set, kind: SET_KIND.WORKING });
       }
@@ -799,6 +1105,19 @@ function round2(value) {
 }
 
 /**
+ * A stable comparison id for a free-typed machine label.
+ *
+ * The label is what the user reads and may re-type slightly differently; the
+ * slug is what the app compares. "Stack A", "stack a" and "Stack  A" are one
+ * machine, which is the whole reason the two are stored separately.
+ */
+function slug(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (!text) return null;
+  return text.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || null;
+}
+
+/**
  * A summary of a finished session: what was done, what it earned, and which
  * lifts now advance. This is what the completion sheet shows, and what the
  * two-week review will quote.
@@ -812,7 +1131,10 @@ export function getSessionSummary(sessionId) {
   const advancing = [];
   const held = [];
   const painLimited = [];
+  const maintained = [];
+  const substitutions = [];
   let warmupSetCount = 0;
+  let topSetCount = 0;
   let dropSequences = 0;
   let failureSets = 0;
 
@@ -823,8 +1145,20 @@ export function getSessionSummary(sessionId) {
 
     const counts = composition(entry);
     warmupSetCount += counts.warmupDone;
+    topSetCount += counts.topDone;
     dropSequences += counts.dropSequences;
     failureSets += counts.failureSets;
+
+    if (entry.substitution) {
+      substitutions.push({
+        exerciseId: entry.exerciseId,
+        plannedName: exercise.name,
+        performedName: entry.substitution.label
+          ?? performedExercise(entry)?.name
+          ?? entry.substitution.performedId,
+        comparableLoad: entry.substitution.comparableLoad === true,
+      });
+    }
 
     const done = workingSets(entry).filter((set) => set.completed);
     if (!done.length) {
@@ -842,18 +1176,30 @@ export function getSessionSummary(sessionId) {
       continue;
     }
 
+    const repeatable = repeatableSets(entry).filter((set) => set.completed && (set.reps ?? 0) > 0);
     const record = {
       exerciseId: entry.exerciseId,
       name: exercise.name,
+      performedName: entry.substitution
+        ? (entry.substitution.label ?? performedExercise(entry)?.name ?? null)
+        : null,
       sets: done.length,
       topWeightKg: Math.max(...done.map((set) => set.weightKg ?? 0)),
+      // The load the next session will actually be built on, so the summary
+      // agrees with the card the user sees next week.
+      workingWeightKg: repeatable.length
+        ? Math.max(...repeatable.map((set) => set.weightKg ?? 0))
+        : null,
+      topSets: counts.topDone,
       reps: done.map((set) => set.reps ?? 0),
       pain: entry.pain ?? null,
     };
 
-    // A pain-limited exercise is reported as its own outcome. Filing it under
-    // "held" would read as a stall, which is precisely the wrong conclusion.
+    // Four outcomes, not two. A pain-limited exercise filed under "held" would
+    // read as a stall, and a maintained movement filed there would read as one
+    // that failed to progress — when not progressing is the prescription.
     if (isPainLimited(entry)) painLimited.push(record);
+    else if (programService.isMaintained(exercise)) maintained.push(record);
     else if (earnedAdvance(exercise, workingSets(entry))) advancing.push(record);
     else held.push(record);
   }
@@ -863,17 +1209,21 @@ export function getSessionSummary(sessionId) {
   return {
     session,
     dayLabel: day?.label ?? session.dayId,
+    schedule: getSchedule(session),
     completion,
     volumeKg: volume.workingKg,
     volume,
     warmupSetCount,
+    topSetCount,
     dropSequences,
     failureSets,
+    substitutions,
     painLogs: getPainLogs(session),
     durationSeconds: session.durationSeconds,
-    exercisesDone: advancing.length + held.length + painLimited.length,
+    exercisesDone: advancing.length + held.length + painLimited.length + maintained.length,
     advancing,
     held,
+    maintained,
     painLimited,
   };
 }
@@ -965,7 +1315,7 @@ export function getSessionVolumeBreakdown(session) {
 /** Set counts for a session, split by kind — the report's set-type table. */
 export function getSessionSetCounts(session) {
   const counts = {
-    working: 0, workingDone: 0, legacy: 0, legacyDone: 0,
+    working: 0, workingDone: 0, top: 0, topDone: 0, legacy: 0, legacyDone: 0,
     warmup: 0, warmupDone: 0, dropSequences: 0, dropStages: 0, failureSets: 0,
   };
 
@@ -1002,12 +1352,27 @@ export function getWeekCompletion(dayKey = today()) {
   const done = scheduled.filter((day) => completedDayIds.has(day.id)).length;
   const total = scheduled.length;
 
+  // Which of this week's scheduled days have not been done yet and are already
+  // behind. This is what makes a missed Tuesday actionable on Wednesday instead
+  // of simply gone: the day is still there, and it can still be trained.
+  const outstanding = scheduled
+    .filter((day) => !completedDayIds.has(day.id))
+    .map((day) => ({ day, fit: programService.getScheduleFit(day.id, dayKey) }));
+
+  const offSchedule = getCompletedSessions()
+    .filter((session) => session.date >= monday && session.date <= dayKey)
+    .filter(isOffSchedule).length;
+
   return {
     done,
     total,
     percent: total ? Math.round((done / total) * 100) : 0,
     weekStart: monday,
     scheduledThisWeek: programService.getTrainingDays().length,
+    outstanding,
+    // Sessions done this week on a day other than their own. Reported, never
+    // penalised: the split is rolling by design.
+    offSchedule,
   };
 }
 

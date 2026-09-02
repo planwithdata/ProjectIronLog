@@ -17,6 +17,7 @@ const PROGRAM_URL = new URL('../../data/workouts.json', import.meta.url);
 let program = null;
 let exerciseIndex = new Map();   // exerciseId -> { exercise, day }
 let retiredIndex = new Map();    // exerciseId -> exercise (no longer prescribed)
+let substituteIndex = new Map(); // exerciseId -> exercise (performed in place of one)
 
 /**
  * Fetch and index the program. Called once during boot.
@@ -45,6 +46,11 @@ export async function load() {
   retiredIndex = new Map();
   for (const exercise of data.retiredExercises ?? []) {
     retiredIndex.set(exercise.id, exercise);
+  }
+
+  substituteIndex = new Map();
+  for (const exercise of data.substituteExercises ?? []) {
+    substituteIndex.set(exercise.id, exercise);
   }
 
   return program;
@@ -77,6 +83,39 @@ function validate(data) {
   for (const exercise of data.retiredExercises ?? []) {
     if (!exercise.id || !exercise.name) {
       throw new Error('A retired exercise in workouts.json is missing "id" or "name".');
+    }
+  }
+
+  if (data.substituteExercises !== undefined && !Array.isArray(data.substituteExercises)) {
+    throw new Error('workouts.json has a "substituteExercises" that is not an array.');
+  }
+  for (const exercise of data.substituteExercises ?? []) {
+    if (!exercise.id || !exercise.name) {
+      throw new Error('A substitute exercise in workouts.json is missing "id" or "name".');
+    }
+    if (!exercise.reps || typeof exercise.reps.min !== 'number') {
+      throw new Error(`Substitute "${exercise.id}" is missing a numeric reps.min.`);
+    }
+  }
+
+  // Every substitution offered has to resolve to something that knows what its
+  // own numbers mean, or a substituted entry becomes a slug with unlabelled
+  // loads — the exact failure `retiredExercises` exists to prevent.
+  const known = new Set([
+    ...data.days.flatMap((day) => day.exercises.map((exercise) => exercise.id)),
+    ...(data.retiredExercises ?? []).map((exercise) => exercise.id),
+    ...(data.substituteExercises ?? []).map((exercise) => exercise.id),
+  ]);
+  for (const day of data.days) {
+    for (const exercise of day.exercises) {
+      for (const option of exercise.substitutions ?? []) {
+        if (!option.id || !known.has(option.id)) {
+          throw new Error(
+            `Exercise "${exercise.id}" offers substitution "${option?.id}", which no day, `
+            + 'retired entry or substituteExercises entry defines.'
+          );
+        }
+      }
     }
   }
 }
@@ -122,6 +161,7 @@ export function getTodayDay(dayKey = today()) {
 export function getExercise(exerciseId) {
   return exerciseIndex.get(exerciseId)?.exercise
     ?? retiredIndex.get(exerciseId)
+    ?? substituteIndex.get(exerciseId)
     ?? null;
 }
 
@@ -143,6 +183,74 @@ export function getRetiredExercises() {
 /** Is this id a movement the program no longer prescribes? */
 export function isRetired(exerciseId) {
   return retiredIndex.has(exerciseId) && !exerciseIndex.has(exerciseId);
+}
+
+/** Movements that exist only as stand-ins for a planned exercise. */
+export function getSubstituteExercises() {
+  return [...substituteIndex.values()];
+}
+
+/** Is this id a stand-in rather than a prescribed movement? */
+export function isSubstitute(exerciseId) {
+  return substituteIndex.has(exerciseId) && !exerciseIndex.has(exerciseId);
+}
+
+/* --- Substitutions ------------------------------------------------------
+   A substitution is *performed work in a planned slot*, not a skipped
+   exercise. The program lists which stand-ins are acceptable for which
+   movements, and whether their loads may be compared — for a different cable
+   attachment the answer is no, and saying so is the whole point.
+   ====================================================================== */
+
+/** Stand-ins the program accepts for one exercise. */
+export function getSubstitutions(exercise) {
+  return Array.isArray(exercise?.substitutions) ? exercise.substitutions : [];
+}
+
+/** One named substitution option, resolved against the program. */
+export function getSubstitution(exercise, substituteId) {
+  return getSubstitutions(exercise).find((option) => option.id === substituteId) ?? null;
+}
+
+/**
+ * Whether a substitution's loads may be read on the same scale as the planned
+ * movement's. Defaults to false: two attachments on the same stack are two
+ * scales, and assuming otherwise is how a grip change becomes a strength gain.
+ */
+export function substitutionComparesLoad(option) {
+  return option?.comparableLoad === true;
+}
+
+/* --- Load context ------------------------------------------------------- */
+
+/**
+ * The machine-tagging declaration for an exercise, or null where tagging makes
+ * no sense. A dumbbell is a dumbbell everywhere; only an arbitrary stack
+ * reading needs to say which stack it came off.
+ */
+export function getLoadContext(exercise) {
+  const context = exercise?.loadContext;
+  return context?.supported ? context : null;
+}
+
+export function supportsLoadContext(exercise) {
+  return getLoadContext(exercise) !== null;
+}
+
+/** Attachment choices for an exercise, or an empty array where there are none. */
+export function getAttachments(exercise) {
+  const context = getLoadContext(exercise);
+  return Array.isArray(context?.attachments) ? context.attachments : [];
+}
+
+/** Tempo guidance, where the program gives any. */
+export function getTempo(exercise) {
+  return exercise?.tempo ?? null;
+}
+
+/** Is this movement held at its load rather than progressed? */
+export function isMaintained(exercise) {
+  return exercise?.progression?.mode === 'maintain';
 }
 
 /**
@@ -275,6 +383,106 @@ export function getTrainingWeek(dayKey = today()) {
     startDate,
     dayCount,
   };
+}
+
+/* --- Where a workout sits against its scheduled day --------------------
+   The split is a weekly template, not a contract. Rish misses a Tuesday and
+   trains chest on Wednesday; the program's own missed-day rules say to treat
+   the split as rolling rather than calendar-locked. So the app has to be able
+   to hold two facts about one session at once: the day it was *scheduled* for,
+   and the day it was actually *done*.
+
+   Everything here is derived from those two, never stored twice. `dayId` and
+   `date` are already on every session, so an old session gets its schedule
+   reading for free and no migration has to invent one.
+   ====================================================================== */
+
+/** How a session's date relates to the day it was scheduled for. */
+export const SCHEDULE_STATUS = {
+  ON_DAY: 'on-day',     // trained on its own weekday
+  LATE:   'late',       // caught up after the fact
+  EARLY:  'early',      // brought forward
+  EXTRA:  'extra',      // a second session of the same day in one week
+};
+
+/**
+ * Where `dateKey` sits relative to the weekday `dayId` is scheduled on.
+ *
+ * The occurrence chosen is the *nearest* one, which is what makes Sunday's
+ * session logged on Monday read as one day late rather than six days early.
+ * Ties break towards `late`, because a caught-up session is far more common
+ * than one brought forward by half a week.
+ *
+ * @returns {{
+ *   status: string, offsetDays: number, scheduledWeekday: number|null,
+ *   scheduledDate: string|null, label: string,
+ * }}
+ */
+export function getScheduleFit(dayId, dateKey = today()) {
+  const day = getDayById(dayId);
+  const scheduledWeekday = day?.weekday ?? null;
+
+  if (!scheduledWeekday) {
+    return {
+      status: SCHEDULE_STATUS.ON_DAY,
+      offsetDays: 0,
+      scheduledWeekday: null,
+      scheduledDate: null,
+      label: 'Unscheduled',
+    };
+  }
+
+  const actualWeekday = isoWeekday(dateKey);
+  // Signed distance in days, wrapped into (-3.5, 3.5]: the nearest occurrence
+  // of that weekday to this date.
+  let offsetDays = actualWeekday - scheduledWeekday;
+  if (offsetDays > 3) offsetDays -= 7;
+  if (offsetDays < -3) offsetDays += 7;
+
+  const scheduledDate = addDays(dateKey, -offsetDays);
+  const status = offsetDays === 0
+    ? SCHEDULE_STATUS.ON_DAY
+    : (offsetDays > 0 ? SCHEDULE_STATUS.LATE : SCHEDULE_STATUS.EARLY);
+
+  return {
+    status,
+    offsetDays,
+    scheduledWeekday,
+    scheduledDate,
+    label: describeScheduleFit(status, offsetDays),
+  };
+}
+
+/** "1 day late", "On its day", "2 days early". */
+export function describeScheduleFit(status, offsetDays) {
+  if (status === SCHEDULE_STATUS.ON_DAY) return 'On its day';
+  if (status === SCHEDULE_STATUS.EXTRA) return 'Extra session';
+  const days = Math.abs(offsetDays);
+  const noun = days === 1 ? 'day' : 'days';
+  return status === SCHEDULE_STATUS.LATE ? `${days} ${noun} late` : `${days} ${noun} early`;
+}
+
+/**
+ * Every training day, ordered for a "which workout am I doing today" picker.
+ *
+ * Today's own day first when it is a training day, then the rest of the week in
+ * schedule order starting from today. That puts the two most likely answers —
+ * "the one I am supposed to do" and "the one I missed yesterday" — at the top,
+ * without hiding anything.
+ */
+export function getTrainingDaysFrom(dayKey = today()) {
+  const weekday = isoWeekday(dayKey);
+  const days = getTrainingDays();
+
+  return [...days].sort((a, b) => rank(a) - rank(b));
+
+  function rank(day) {
+    // Distance forward from today, so today is 0 and yesterday is 6.
+    const forward = (day.weekday - weekday + 7) % 7;
+    // Yesterday and the day before are the likely catch-ups, so they come
+    // straight after today rather than at the end of the week.
+    return forward === 0 ? 0 : (forward >= 5 ? forward - 4.5 : forward + 2);
+  }
 }
 
 /**

@@ -56,7 +56,7 @@ export const TONE = {
  * @param {{startAvg: number|null, endAvg: number|null, perWeek: number|null, goalKg: number|null}} [input.weight]
  * @param {{startPercent: number|null, endPercent: number|null}} [input.bodyFat]
  * @param {{done: number, scheduled: number}} [input.adherence]
- * @param {{improved: number, held: number, regressed: number, tracked: number, advancing: string[], stalled: string[]}} [input.strength]
+ * @param {{improved: number, held: number, regressed: number, tracked: number, advancing: string[], stalled: string[], painExcluded?: string[], scaleChanged?: string[]}} [input.strength]
  * @param {{currentKg: number, previousKg: number|null}} [input.volume]
  * @param {{records: number}} [input.records]
  * @param {{meanSleepHours: number|null, meanSoreness: number|null, entries: number}} [input.recovery]
@@ -213,6 +213,14 @@ function addStrengthFinding(findings, { strength }) {
 
   // Say so when a lift was left out. A strength verdict computed over four of
   // six lifts should not be read as though it covered all six.
+  // Named rather than dropped: a lift whose load scale changed inside the
+  // fortnight cannot be compared, and quietly excluding it would report a
+  // smaller and rosier sample than the training actually produced.
+  if (strength.scaleChanged?.length) {
+    text += ` Not comparable this period (load scale changed): `
+      + `${strength.scaleChanged.slice(0, 3).join(', ')}${strength.scaleChanged.length > 3 ? '…' : ''}.`;
+  }
+
   if (strength.painExcluded?.length) {
     text += ` Excluded as pain-limited: ${strength.painExcluded.slice(0, 3).join(', ')}.`;
   }

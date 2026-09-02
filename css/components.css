@@ -655,3 +655,129 @@ textarea.input { min-height: 88px; resize: vertical; line-height: var(--lh-norma
   .reminder__actions { width: 100%; }
   .reminder__actions .btn { flex: 1 1 auto; }
 }
+
+/* --- Choice list -------------------------------------------------------
+   A tappable list inside a sheet, for "which one" rather than "yes or no":
+   which workout today, which machine this is, which substitute was performed.
+
+   Each row is two lines by design. In every one of those questions the
+   consequence of the choice is what decides it — when a workout was last done,
+   whether a machine's loads are comparable — so the second line is the content,
+   not decoration, and the row is sized to hold it comfortably.
+   ====================================================================== */
+
+.choice-list {
+  display: grid;
+  gap: var(--s-1);
+}
+
+.choice-list__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  min-height: var(--touch);
+  padding: var(--s-3);
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+  color: var(--c-text);
+  text-align: left;
+}
+
+.choice-list__row:active { transform: scale(0.99); }
+.choice-list__row:disabled { opacity: 0.45; }
+
+/* The currently selected option. A left edge rather than a fill, so it reads
+   as "you are here" instead of competing with the accent used for actions. */
+.choice-list__row[aria-current="true"] {
+  border-color: var(--c-accent);
+  background: var(--c-surface-3);
+}
+
+.choice-list__row--accent {
+  border-inline-start: 3px solid var(--c-accent);
+}
+
+.choice-list__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  background: var(--c-surface-3);
+  color: var(--c-text-2);
+}
+
+.choice-list__body {
+  display: grid;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.choice-list__label {
+  font-size: var(--t-subhead);
+  font-weight: var(--w-semibold);
+}
+
+.choice-list__sub {
+  font-size: var(--t-caption);
+  color: var(--c-text-3);
+  line-height: var(--lh-snug);
+}
+
+.choice-list__tick {
+  flex: 0 0 auto;
+  color: var(--c-accent);
+}
+
+@media (hover: hover) {
+  .choice-list__row:hover { background: var(--c-surface-3); }
+}
+
+/* --- Day chip ----------------------------------------------------------
+   "Wednesday · 1 day late" — an outstanding workout on Home, tappable to go
+   and do it.
+
+   A pill would have been the obvious reuse and is the wrong component: a pill
+   is a 24px-tall *label*, and these are actions that start a workout. At that
+   height they fail the 44px touch floor, which is what the accessibility audit
+   caught. So it is its own thing, sized for a thumb, with the schedule offset
+   on a second line where it does not compete with the day's name.
+   ====================================================================== */
+
+.day-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  min-height: var(--touch);
+  padding: var(--s-1) var(--s-3);
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+  color: var(--c-text);
+  text-align: left;
+}
+
+.day-chip__label {
+  font-size: var(--t-footnote);
+  font-weight: var(--w-semibold);
+  line-height: 1.2;
+}
+
+.day-chip__meta {
+  font-size: var(--t-micro);
+  color: var(--c-text-3);
+  line-height: 1.2;
+}
+
+.day-chip:active { transform: scale(0.98); }
+
+@media (hover: hover) {
+  .day-chip:hover { background: var(--c-surface-3); border-color: var(--c-accent); }
+}

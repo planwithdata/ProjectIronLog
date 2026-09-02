@@ -8,7 +8,7 @@
 
 import * as db from './db.js';
 import { COLLECTIONS } from './db.js';
-import { today, addDays, daysBetween } from '../core/format.js';
+import { today, addDays } from '../core/format.js';
 import * as sessionService from './session-service.js';
 import * as programService from './program-service.js';
 import * as bodyService from './body-service.js';
@@ -17,7 +17,9 @@ import * as notesService from './notes-service.js';
 import * as settingsService from './settings-service.js';
 import { recovery, measurements, photos } from './logs-service.js';
 import { buildReview } from '../engine/review.js';
-import { estimate1rm } from '../engine/one-rep-max.js';
+import { repRange } from '../engine/progression.js';
+import { markDiscontinuities, isMachineScaled } from '../engine/context.js';
+import { readPerformance } from '../engine/insights.js';
 
 /**
  * Collect every figure for the period ending `endKey`.
@@ -163,10 +165,23 @@ function adherenceBundle(startKey, endKey, days) {
 /**
  * Which lifts improved, held or regressed.
  *
- * Compared on best estimated 1RM in the period against the previous period,
- * because that is the only measure that registers progress made by adding reps
- * — which is most of what double progression produces between load increases.
- * Deload sessions are excluded so the scheduled dip is not read as regression.
+ * Compared on estimated 1RM in the period against the previous period, because
+ * that is the only measure that registers progress made by adding reps — which
+ * is most of what double progression produces between load increases.
+ *
+ * Three exclusions, each of which was producing a wrong answer:
+ *
+ *   - **Deload sessions**, so the scheduled dip is not read as regression.
+ *   - **Pain-limited sessions**, so an elbow is not read as lost strength.
+ *   - **Movements whose load scale changed inside the window**, because a
+ *     different cable stack reading 50 where the last one read 9.1 is not a
+ *     440% gain. They are reported as unreadable rather than as a triumph.
+ *
+ * And the reading itself is the mean estimated 1RM across the sets performed at
+ * the working load, not the best single set — the same figure the Progress
+ * dashboard uses, so the two cannot disagree about the same fortnight. Reading
+ * the best set instead let one strong first set stand in for a session that got
+ * worse everywhere else.
  */
 function strengthBundle(startKey, endKey, priorStart, priorEnd) {
   let improved = 0;
@@ -176,10 +191,15 @@ function strengthBundle(startKey, endKey, priorStart, priorEnd) {
   const stalled = [];
   const painExcluded = [];
 
+  const scaleChanged = [];
+
   for (const exercise of programService.getAllExercises()) {
     // A warm-up-only movement has no working sets and therefore no strength
-    // trend to report.
+    // trend to report. A maintained one has working sets but no progression to
+    // judge, and calling a deliberate load reduction a regression would be the
+    // review arguing with the program.
     if (programService.isWarmupOnly(exercise)) continue;
+    if (programService.isMaintained(exercise)) continue;
 
     const all = sessionService
       .getExerciseHistory(exercise.id, Infinity)
@@ -194,13 +214,30 @@ function strengthBundle(startKey, endKey, priorStart, priorEnd) {
       performance.painLimited && performance.date >= startKey && performance.date <= endKey);
     if (excludedInPeriod) painExcluded.push(exercise.name);
 
+    // Oldest first, read the same way the dashboard reads it, then marked for
+    // scale breaks so a machine change can be detected inside the window.
+    const range = repRange(exercise);
+    const readings = markDiscontinuities(
+      [...history].reverse()
+        .map((performance) => readPerformance(performance, range))
+        .map((point) => ({ ...point, loadKg: point.workingLoadKg })),
+      { machineScaled: isMachineScaled(exercise) }
+    );
+
+    // A break anywhere in the current window makes the comparison meaningless.
+    const broke = readings.some((point) =>
+      point.date >= startKey && point.date <= endKey
+      && (point.contextChanged || point.discontinuous));
+    if (broke) {
+      scaleChanged.push(exercise.name);
+      continue;
+    }
+
     const best = (from, to) => {
       let top = 0;
-      for (const performance of history) {
-        if (performance.date < from || performance.date > to) continue;
-        for (const set of performance.sets) {
-          top = Math.max(top, estimate1rm(set.weightKg ?? 0, set.reps ?? 0));
-        }
+      for (const point of readings) {
+        if (point.date < from || point.date > to) continue;
+        top = Math.max(top, point.e1rmKg);
       }
       return top;
     };
@@ -224,6 +261,9 @@ function strengthBundle(startKey, endKey, priorStart, priorEnd) {
     advancing,
     stalled,
     painExcluded,
+    // Named so the review can say "these four could not be read" rather than
+    // silently dropping them and reporting a smaller, rosier sample.
+    scaleChanged,
   };
 }
 
@@ -254,23 +294,29 @@ function volumeBundle(startKey, endKey, priorStart, priorEnd) {
 function setTypeBundle(startKey, endKey) {
   const totals = {
     workingSets: 0,
+    topSets: 0,
     warmupSets: 0,
     dropSequences: 0,
     failureSets: 0,
     unclassifiedSets: 0,
+    substitutions: 0,
+    offScheduleSessions: 0,
     workingVolumeKg: 0,
     warmupVolumeKg: 0,
     intensityVolumeKg: 0,
     intensityExercises: [],
+    substitutedExercises: [],
   };
 
   const withIntensity = new Set();
+  const substituted = new Set();
 
   for (const session of sessionsIn(startKey, endKey)) {
     const counts = sessionService.getSessionSetCounts(session);
     const volume = sessionService.getSessionVolumeBreakdown(session);
 
     totals.workingSets += counts.workingDone;
+    totals.topSets += counts.topDone;
     totals.unclassifiedSets += counts.legacyDone;
     totals.warmupSets += counts.warmupDone;
     totals.dropSequences += counts.dropSequences;
@@ -278,6 +324,7 @@ function setTypeBundle(startKey, endKey) {
     totals.workingVolumeKg += volume.workingKg;
     totals.warmupVolumeKg += volume.warmupKg;
     totals.intensityVolumeKg += volume.intensityKg;
+    if (sessionService.isOffSchedule(session)) totals.offScheduleSessions += 1;
 
     for (const entry of session.entries) {
       if ((entry.intensitySets ?? []).length) {
@@ -285,14 +332,24 @@ function setTypeBundle(startKey, endKey) {
           programService.getExercise(entry.exerciseId)?.name ?? entry.exerciseId
         );
       }
+      if (entry.substitution) {
+        totals.substitutions += 1;
+        substituted.add(entry.substitution.label ?? entry.substitution.performedId);
+      }
     }
   }
 
   // Unclassified legacy sets are counted as working sets by the engine, so the
   // headline figure has to include them or it will not match what progression
   // actually read. The separate count is what keeps that visible.
-  totals.workingSets += totals.unclassifiedSets;
+  //
+  // Top sets are counted the same way and for the same reason: they are real
+  // working sets that were performed and they belong in the working total. What
+  // they are *not* is the load the next session is built on, and the separate
+  // count is what makes that visible rather than merely true.
+  totals.workingSets += totals.unclassifiedSets + totals.topSets;
   totals.intensityExercises = [...withIntensity];
+  totals.substitutedExercises = [...substituted];
 
   return totals;
 }

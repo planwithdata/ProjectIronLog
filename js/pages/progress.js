@@ -1,6 +1,30 @@
 /**
  * progress.js — The Progress dashboard.
  *
+ * Reading order
+ * -------------
+ * Conclusions first, then the charts that support them, then body data. That
+ * order is the point of this page's rewrite: the previous version opened with a
+ * body-weight line and one exercise's estimated 1RM, which answered "what did I
+ * do" and left "am I getting stronger, and where" as an exercise for the
+ * reader. So the page now opens with the answer — in sentences — and every
+ * chart below it exists to be checked against that answer rather than to be
+ * interpreted from scratch.
+ *
+ * The interpretation itself lives in `engine/insights.js`, which is pure and
+ * tested. This file lays it out and does no reasoning of its own: if a status
+ * or a percentage looks wrong, it is wrong in the engine, and there is exactly
+ * one place to fix it.
+ *
+ * What the page will not do
+ * -------------------------
+ * It does not print a confident number over two data points. Insights carry a
+ * `confidence` and a `comparableSessions` count, and cards defer to them —
+ * "not enough comparable sessions yet" is a real answer and appears often in
+ * the first month. It also never compares loads across a machine change; those
+ * exercises are listed under their own heading with what can and cannot be
+ * said about them.
+ *
  * Layout follows one filter row, then sections. The range and exercise
  * controls sit in that single row above everything they scope, rather than
  * inside individual cards: a filter buried in a card looks like it only
@@ -20,7 +44,7 @@ import {
   today, trimNumber, displayWeight, formatDate, relativeDay, pluralize,
 } from '../core/format.js';
 import * as analytics from '../services/analytics-service.js';
-import { RANGES } from '../services/analytics-service.js';
+import { RANGES, STATUS } from '../services/analytics-service.js';
 import * as bodyService from '../services/body-service.js';
 import * as sessionService from '../services/session-service.js';
 import * as settingsService from '../services/settings-service.js';
@@ -189,16 +213,394 @@ function overviewStats(days, endKey, units) {
 
 function paintSections(host, context) {
   disposeCards();
+  // Insight readings are memoised for one paint. Four cards ask for the same
+  // exercise's reading, and recomputing a whole history four times per render
+  // is the sort of waste that shows up as a stutter on a phone.
+  analytics.resetInsights();
   host.id = 'progress-body';
 
   replace(host, [
-    weightSection(context),
+    // The answers, in sentences.
+    headlineSection(context),
+    scorecardSection(context),
+    driverSection(context),
+    // Then the evidence, per exercise.
     strengthSection(context),
+    adherenceSection(context),
+    // Then the program-level shape.
+    muscleSection(context),
+    waveSection(context),
+    deloadSection(context),
     volumeSection(context),
     consistencySection(context),
     recordsSection(),
+    // Then the body, which is a different subject and reads last.
+    weightSection(context),
     compositionSection(context),
   ].filter(Boolean));
+}
+
+/* --- The reading -------------------------------------------------------
+   The three questions the brief opens with — am I getting stronger, which
+   lifts need attention, where is the progress coming from — answered in
+   words, above every chart. A dashboard that makes the reader derive these
+   from a line graph has not answered them.
+   ====================================================================== */
+
+function headlineSection({ days, endKey }) {
+  const reading = analytics.headlines(days, endKey);
+  if (!sessionService.getCompletedSessions().length) return null;
+
+  const strength = reading.strength;
+  const tone = { yes: 'success', mixed: 'warning', no: 'danger', unknown: '' }[strength.verdict];
+
+  return el('section', {}, [
+    sectionHead('Where you are'),
+    el('div.card', {}, [
+      el('div.row', { style: { gap: 'var(--s-3)', alignItems: 'flex-start' } }, [
+        el('div.reading__mark', {}, [icon('trend', { size: 20 })]),
+        el('div', { style: { minWidth: 0, flex: '1 1 auto' } }, [
+          el('div.row', { style: { gap: 'var(--s-2)', alignItems: 'baseline', flexWrap: 'wrap' } }, [
+            el('h3.t-title-3', { text: 'Am I getting stronger?' }),
+            tone
+              ? el(`span.pill.pill--${tone}`, {
+                  text: { yes: 'Yes', mixed: 'Mostly', no: 'Not yet', unknown: 'Too early' }[strength.verdict],
+                })
+              : null,
+          ].filter(Boolean)),
+          el('p.t-subhead.t-dim', { text: strength.text, style: { marginTop: '2px' } }),
+        ]),
+      ]),
+
+      el('div.reading__list', {}, [
+        reading.driver
+          ? readingRow('Where the progress comes from', reading.driver.text)
+          : null,
+        reading.attention.length
+          ? readingRow(
+              'Needs attention',
+              reading.attention.map((item) => `${item.name} (${item.statusLabel.toLowerCase()})`).join(', ')
+            )
+          : readingRow('Needs attention', 'Nothing is stalled or losing reps.'),
+        reading.scaleChanged
+          ? readingRow(
+              'Not comparable',
+              `${pluralize(reading.scaleChanged, 'exercise')} changed load scale — tag the machine `
+              + 'and the trend restarts from there.'
+            )
+          : null,
+        readingRow(
+          'Consistency',
+          consistencySentence(reading.consistency)
+        ),
+      ].filter(Boolean)),
+    ]),
+  ]);
+}
+
+function readingRow(label, text) {
+  return el('div.reading__row', {}, [
+    el('span.reading__label', { text: label }),
+    el('span.reading__text', { text }),
+  ]);
+}
+
+/**
+ * Consistency in a sentence, and deliberately not as a percentage.
+ *
+ * The program's own missed-day rules call the split rolling, so a session
+ * trained a day late is done rather than missed — and a completion percentage
+ * that docks it would be grading against a calendar the plan does not keep.
+ */
+function consistencySentence(consistency) {
+  if (!consistency.sessions) return 'No sessions in this range.';
+  const parts = [`${pluralize(consistency.sessions, 'session')}`];
+  if (consistency.perWeek) parts.push(`${consistency.perWeek} a week`);
+  if (consistency.lateSessions) {
+    parts.push(`${consistency.lateSessions} trained on a different day, all counted as done`);
+  }
+  if (consistency.longestGapDays !== null) {
+    parts.push(`longest gap ${pluralize(consistency.longestGapDays, 'day')}`);
+  }
+  return `${parts.join(' · ')}.`;
+}
+
+/* --- Scorecard ---------------------------------------------------------
+   Every exercise sorted into the pile that says what to do about it. The
+   attention pile leads, because it is the only one that asks for a decision.
+   ====================================================================== */
+
+function scorecardSection() {
+  const board = analytics.getScorecard();
+  const total = Object.values(board).reduce((sum, list) => sum + list.length, 0);
+  if (!total) return null;
+
+  const groups = [
+    { key: 'attention', title: 'Needs attention', tone: 'danger', list: board.attention,
+      blurb: 'Stalled, or losing reps under a load that is holding. These are the ones worth '
+        + 'changing something about.' },
+    { key: 'scaleChanged', title: 'Load scale changed', tone: 'warning', list: board.scaleChanged,
+      blurb: 'The numbers moved further than training explains, or the machine was different. '
+        + 'Tag the machine while logging and the trend picks up from there.' },
+    { key: 'progressing', title: 'Progressing', tone: 'success', list: board.progressing,
+      blurb: 'Estimated strength up over the comparable run, or more reps at the same load.' },
+    { key: 'holding', title: 'Holding', tone: '', list: board.holding,
+      blurb: 'Flat, but not for long enough to call it a stall.' },
+    { key: 'maintained', title: 'Maintained by design', tone: '', list: board.maintained,
+      blurb: 'Quality work the program does not progress. Never stalled, never advanced.' },
+    { key: 'tooNew', title: 'Too new to read', tone: '', list: board.tooNew,
+      blurb: 'One comparable session so far.' },
+  ].filter((group) => group.list.length);
+
+  return el('section', {}, [
+    sectionHead('Every exercise', { hint: pluralize(total, 'movement') }),
+    el('div.stack', { style: { gap: 'var(--s-4)' } }, groups.map((group) =>
+      el('div.card', {}, [
+        el('div.row', { style: { gap: 'var(--s-2)', alignItems: 'baseline' } }, [
+          el('h3.t-callout.t-semibold', { text: group.title }),
+          el(`span.pill${group.tone ? `.pill--${group.tone}` : ''}`, {
+            text: String(group.list.length),
+          }),
+        ]),
+        el('p.t-caption.t-faint', { text: group.blurb, style: { marginTop: '2px' } }),
+        el('div.stack', { style: { gap: 'var(--s-2)', marginTop: 'var(--s-3)' } },
+          group.list.map((item) => insightRow(item))),
+      ])
+    )),
+  ]);
+}
+
+/**
+ * One exercise's reading: name, what it is doing, the numbers behind it, and a
+ * sentence saying what that means.
+ *
+ * Tapping it selects the exercise for the strength chart below, so the row is
+ * the way into the detail rather than a dead end.
+ */
+function insightRow(insight) {
+  const units = settingsService.getUnits();
+  const numbers = [
+    insight.load.from === null
+      ? null
+      : `${trimNumber(displayWeight(insight.load.from, units), 2)} → ${trimNumber(displayWeight(insight.load.to, units), 2)} ${units}`,
+    `${insight.reps.from} → ${insight.reps.to} reps`,
+    insight.e1rm.percent === null || insight.maintained
+      ? null
+      : `est. 1RM ${signedPercent(insight.e1rm.percent)}`,
+  ].filter(Boolean).join(' · ');
+
+  return el('button.insight-row', {
+    type: 'button',
+    on: {
+      click: () => {
+        exerciseId = insight.exerciseId;
+        rerender();
+        document.querySelector('#progress-strength')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      },
+    },
+  }, [
+    el('div.row.row--between', { style: { gap: 'var(--s-2)' } }, [
+      el('span.t-subhead.t-semibold.t-truncate', { text: insight.name }),
+      el('span.t-micro.t-faint', {
+        // How much of the history the reading could actually use. The gap
+        // between this and the session count is the honest answer to "how much
+        // of my log is comparable", and it belongs next to the conclusion.
+        text: insight.comparableSessions === insight.sessions
+          ? pluralize(insight.sessions, 'session')
+          : `${insight.comparableSessions} of ${insight.sessions} comparable`,
+      }),
+    ]),
+    numbers ? el('div.t-caption.t-dim.tnum', { text: numbers }) : null,
+    el('div.t-caption.t-faint', { text: insight.statusDetail }),
+  ].filter(Boolean));
+}
+
+/* --- Load versus reps --------------------------------------------------
+   "Where am I adding reps versus adding load" — a question double
+   progression makes answerable and that no single chart shows. Counted in
+   exercises rather than averaged, because a mean of a squat's percentage and
+   a lateral raise's percentage refers to nothing.
+   ====================================================================== */
+
+function driverSection() {
+  const mix = analytics.getDriverMix();
+  if (!mix.total) return null;
+
+  return el('section', {}, [
+    sectionHead('Load or reps'),
+    el('div.card', {}, [
+      el('p.t-caption.t-faint', {
+        text: 'Double progression adds reps until the top of the range, then load. Early in a '
+          + 'wave this should lean towards reps; a run of load-driven weeks with reps falling is '
+          + 'the pattern worth catching.',
+      }),
+      el('ul.muscle-bars', { style: { marginTop: 'var(--s-3)' } }, mix.byDriver.map((row) =>
+        el('li.muscle-bars__row', {}, [
+          el('span.muscle-bars__label', { text: row.label }),
+          el('span.muscle-bars__track', {}, [
+            el('span.muscle-bars__fill', { style: { width: `${Math.max(2, row.percent)}%` } }),
+          ]),
+          el('span.muscle-bars__value.tnum', { text: `${row.count}` }),
+        ])
+      )),
+    ]),
+  ]);
+}
+
+/* --- Adherence ---------------------------------------------------------
+   What the app planned against what was actually performed. Both facts are
+   kept in the log and neither overwrites the other, so this is the card that
+   says so — and it reads a consistent bias as feedback about the plan rather
+   than as a failure by the lifter.
+   ====================================================================== */
+
+function adherenceSection() {
+  const rows = analytics.getAdherence();
+  if (!rows.length) return null;
+
+  const units = settingsService.getUnits();
+
+  return el('section', {}, [
+    sectionHead('Plan against performance', { hint: pluralize(rows.length, 'exercise') }),
+    el('div.card', {}, [
+      el('p.t-caption.t-faint', {
+        text: 'The app keeps what it prescribed and what you actually lifted as two separate '
+          + 'facts. A consistent gap is information about the prescription, not a mistake — '
+          + 'recommendations always build on what was performed.',
+      }),
+      el('div.stack', { style: { gap: 'var(--s-2)', marginTop: 'var(--s-3)' } },
+        rows.slice(0, 8).map((row) => el('div.insight-row.insight-row--static', {}, [
+          el('div.row.row--between', { style: { gap: 'var(--s-2)' } }, [
+            el('span.t-subhead.t-semibold.t-truncate', { text: row.name }),
+            el(`span.t-micro.t-semibold.tnum.stat__delta--${row.meanDeviationKg > 0 ? 'up' : 'down'}`, {
+              text: `${row.meanDeviationKg > 0 ? '+' : '−'}${trimNumber(Math.abs(displayWeight(row.meanDeviationKg, units)), 2)} ${units}`,
+            }),
+          ]),
+          el('div.t-caption.t-dim', {
+            text: `${pluralize(row.deviations, 'session')} off plan `
+              + `(${row.above} above, ${row.below} below) · ${row.verdict}`,
+          }),
+        ]))),
+    ]),
+  ]);
+}
+
+/* --- Muscle groups ----------------------------------------------------- */
+
+function muscleSection() {
+  const groups = analytics.getMuscleProgress().filter((group) => group.changeRatio !== null);
+  if (groups.length < 2) return null;
+
+  const max = Math.max(...groups.map((group) => Math.abs((group.changeRatio ?? 1) - 1)), 0.01);
+
+  return el('section', {}, [
+    sectionHead('By muscle group'),
+    el('div.card', {}, [
+      el('p.t-caption.t-faint', {
+        text: 'Median change in estimated strength across the exercises whose primary muscle is '
+          + 'this one. A median rather than a mean, because with two or three exercises per group '
+          + 'one outlier would otherwise decide the whole reading.',
+      }),
+      el('ul.muscle-bars', { style: { marginTop: 'var(--s-3)' } }, groups.map((group) => {
+        const change = (group.changeRatio ?? 1) - 1;
+        return el('li.muscle-bars__row', {
+          title: group.names.join(', '),
+        }, [
+          el('span.muscle-bars__label', { text: group.muscle }),
+          el('span.muscle-bars__track', {}, [
+            el(`span.muscle-bars__fill${change < 0 ? '.muscle-bars__fill--down' : ''}`, {
+              style: { width: `${Math.max(2, (Math.abs(change) / max) * 100)}%` },
+            }),
+          ]),
+          el('span.muscle-bars__value.tnum', { text: signedPercent(Math.round(change * 100)) }),
+        ]);
+      })),
+      el('p.t-caption.t-faint', {
+        text: 'An exercise counts in full towards each of its primary muscles and not at all '
+          + 'towards its secondaries — the program does not say how a row splits between lats '
+          + 'and mid back. Read these as emphasis, not physiology.',
+        style: { marginTop: 'var(--s-3)' },
+      }),
+    ]),
+  ]);
+}
+
+/* --- Wave weeks -------------------------------------------------------- */
+
+function waveSection({ units }) {
+  const wave = analytics.waveWeekProgress();
+  if (wave.volume.length < 2) return null;
+
+  const card = chartCard({
+    title: 'Average session by wave week',
+    subtitle: 'Week 1 of every cycle grouped together, not calendar weeks',
+    type: 'bar',
+    height: 170,
+    yBounds: 'zero',
+    series: [{
+      label: `Volume (${units})`,
+      points: wave.volume.map((week) => ({
+        date: `w${week.waveWeek}`,
+        value: displayWeight(week.value, units),
+      })),
+    }],
+    formatValue: (value) => compactNumber(value),
+    formatLabel: (key) => {
+      const week = wave.volume.find((item) => `w${item.waveWeek}` === key);
+      return week ? `${week.label}${week.isDeload ? ' ·D' : ''}` : key;
+    },
+    valueHeader: `Volume (${units})`,
+  });
+
+  return el('section', {}, [
+    sectionHead('The wave', { hint: `${wave.volume.length} of 5 weeks logged` }),
+    track(card),
+    el('p.t-caption.t-faint', {
+      text: 'The plan is four loading weeks then a deload. Grouped this way, week 4 should be '
+        + 'the tallest bar and week 5 the shortest — a flat set of bars means the wave is not '
+        + 'actually being run.',
+      style: { marginTop: 'var(--s-2)', padding: '0 var(--s-1)' },
+    }),
+  ]);
+}
+
+/* --- Deload response --------------------------------------------------- */
+
+function deloadSection({ units }) {
+  const rows = analytics.getDeloadResponse();
+  if (!rows.length) return null;
+
+  const better = rows.filter((row) => (row.change.ratio ?? 1) > 1.01).length;
+
+  return el('section', {}, [
+    sectionHead('After the deload', { hint: `${better} of ${rows.length} came back stronger` }),
+    el('div.card', {}, [
+      el('p.t-caption.t-faint', {
+        text: 'The justification for giving up a training week is that the week after it goes '
+          + 'better. This is the card that checks.',
+      }),
+      el('div.stack', { style: { gap: 'var(--s-2)', marginTop: 'var(--s-3)' } },
+        rows.map((row) => el('div.insight-row.insight-row--static', {}, [
+          el('div.row.row--between', { style: { gap: 'var(--s-2)' } }, [
+            el('span.t-subhead.t-semibold.t-truncate', { text: row.name }),
+            el(`span.t-micro.t-semibold.tnum.stat__delta--${(row.change.delta ?? 0) >= 0 ? 'up' : 'down'}`, {
+              text: `${signedPercent(row.change.percent ?? 0)} est. 1RM`,
+            }),
+          ]),
+          el('div.t-caption.t-dim', {
+            text: `${trimNumber(displayWeight(row.before.loadKg, units), 2)} ${units} × `
+              + `${row.before.reps} reps → ${trimNumber(displayWeight(row.after.loadKg, units), 2)} ${units} × `
+              + `${row.after.reps} reps`,
+          }),
+        ]))),
+    ]),
+  ]);
+}
+
+function signedPercent(percent) {
+  const value = Math.round(Number(percent) || 0);
+  if (value === 0) return '0%';
+  return `${value > 0 ? '+' : '−'}${Math.abs(value)}%`;
 }
 
 /* --- Body weight -------------------------------------------------------- */
@@ -299,8 +701,10 @@ function strengthSection({ days, endKey, units }) {
   if (!exerciseId) return null;
 
   const data = analytics.strengthSeries(exerciseId, days, endKey);
+  const insight = data.insight;
+
   if (!data.e1rm.length) {
-    return el('section', {}, [
+    return el('section', { id: 'progress-strength' }, [
       sectionHead('Strength'),
       el('div.card.card--quiet', {}, [
         emptyState({
@@ -315,10 +719,28 @@ function strengthSection({ days, endKey, units }) {
   const toDisplay = (points) =>
     points.map((point) => ({ date: point.date, value: displayWeight(point.value, units) }));
 
+  // Three series, and the middle one is the addition that matters. **Working
+  // load** is what was actually repeated across the sets and what the next
+  // session is built on; **top set** is the heaviest single thing lifted. They
+  // were the same number until a probe was logged among the working sets, and
+  // on the flat dumbbell bench they now differ by 17 kg. Drawing only the top
+  // set is what made a one-off 72 kg set look like the new normal.
   const series = [
-    { label: 'Estimated 1RM', points: toDisplay(data.e1rm) },
-    { label: 'Top set', points: toDisplay(data.topSet) },
-  ];
+    { label: 'Est. 1RM (working sets)', points: toDisplay(data.e1rm) },
+    { label: 'Working load', points: toDisplay(data.workingLoad), breakGaps: true },
+    data.workingLoadPrior.length
+      ? {
+        label: 'Earlier, another scale',
+        points: toDisplay(data.workingLoadPrior),
+        color: 'var(--c-text-3)',
+        // Marks, no line. These readings happened, and they do not form a
+        // trend with each other or with the current ones — a line between two
+        // machines' numbers is a picture of a change that never occurred.
+        pointsOnly: true,
+      }
+      : null,
+    { label: 'Top set', points: toDisplay(data.topSet), dashed: true, showPoints: true },
+  ].filter(Boolean);
 
   const bounds = analytics.niceBounds(
     series.flatMap((entry) => entry.points),
@@ -327,13 +749,16 @@ function strengthSection({ days, endKey, units }) {
 
   const card = chartCard({
     title: data.exercise?.name ?? 'Strength',
-    subtitle: 'Estimated 1RM (Epley) and heaviest completed set',
-    headline: data.stats
+    subtitle: 'Estimated 1RM as the mean across the sets at the working load, '
+      + 'with the load itself and the heaviest single set',
+    headline: insight && !insight.maintained && insight.e1rm.to !== null
       ? {
-          value: trimNumber(displayWeight(data.stats.last, units), 1),
+          value: trimNumber(displayWeight(insight.e1rm.to, units), 1),
           unit: units,
-          delta: Number(displayWeight(data.stats.change, units).toFixed(1)),
-          deltaSuffix: 'in range',
+          delta: insight.e1rm.delta === null
+            ? null
+            : Number(displayWeight(insight.e1rm.delta, units).toFixed(1)),
+          deltaSuffix: `over ${pluralize(insight.comparableSessions, 'session')}`,
         }
       : null,
     type: 'line',
@@ -346,36 +771,158 @@ function strengthSection({ days, endKey, units }) {
     emptyText: 'Log this exercise to see it here.',
   });
 
-  return el('section', {}, [
-    sectionHead('Strength', { hint: pluralize(data.e1rm.length, 'session') }),
+  return el('section', { id: 'progress-strength' }, [
+    sectionHead('Strength', {
+      hint: insight
+        ? (insight.comparableSessions === insight.sessions
+          ? pluralize(insight.sessions, 'session')
+          : `${insight.comparableSessions} of ${insight.sessions} comparable`)
+        : pluralize(data.e1rm.length, 'session'),
+    }),
     track(card),
+
+    // Every caveat the reading carries, stated where the chart is rather than
+    // in a footnote nobody reads. A break in the line is meaningless without
+    // the sentence that says what broke it.
+    data.breaks.length
+      ? el('div.card.card--quiet', { style: { marginTop: 'var(--s-2)' } },
+          data.breaks.map((point) => el('div.row', {
+            style: { gap: 'var(--s-2)', alignItems: 'flex-start', marginBottom: 'var(--s-2)' },
+          }, [
+            icon('warning', { size: 14 }),
+            el('div', { style: { minWidth: 0 } }, [
+              el('div.t-caption.t-semibold', { text: formatDate(point.date) }),
+              el('div.t-caption.t-dim', { text: point.note ?? '' }),
+            ]),
+          ])))
+      : null,
+
+    insight ? insightDetail(insight, units) : null,
+
     el('p.t-caption.t-faint', {
-      text: 'Estimated 1RM is the series to watch — it registers progress made by adding reps, which is most of what double progression produces between load increases.',
+      text: 'Estimated 1RM is the series to watch — it registers progress made by adding reps, '
+        + 'which is most of what double progression produces between load increases. It is a '
+        + 'mean across the sets performed at the working load, so one strong first set cannot '
+        + 'stand in for a session that got worse everywhere else.',
       style: { marginTop: 'var(--s-2)', padding: '0 var(--s-1)' },
     }),
-  ]);
+  ].filter(Boolean));
+}
+
+/**
+ * The selected exercise's reading, laid out beside its chart: status, the three
+ * numbers behind it, its records, and how much of its history was usable.
+ */
+function insightDetail(insight, units) {
+  const tone = {
+    [STATUS.PROGRESSING]: 'success',
+    [STATUS.STALLED]: 'danger',
+    [STATUS.GRINDING]: 'danger',
+    [STATUS.SCALE_CHANGE]: 'warning',
+  }[insight.status] ?? '';
+
+  const records = analytics.getMeaningfulRecords(insight.exerciseId);
+
+  return el('div.card', { style: { marginTop: 'var(--s-3)' } }, [
+    el('div.row', { style: { gap: 'var(--s-2)', alignItems: 'baseline', flexWrap: 'wrap' } }, [
+      el(`span.pill${tone ? `.pill--${tone}` : ''}`, { text: insight.statusLabel }),
+      el('span.t-caption.t-faint', {
+        text: `${insight.confidence} confidence · `
+          + `${pluralize(insight.comparableSessions, 'comparable session')}`,
+      }),
+    ]),
+    el('p.t-subhead.t-dim', { text: insight.statusDetail, style: { marginTop: 'var(--s-2)' } }),
+
+    el('div.grid.grid--auto', { style: { marginTop: 'var(--s-3)' } }, [
+      stat({
+        label: 'Working load',
+        value: insight.load.to === null ? null : trimNumber(displayWeight(insight.load.to, units), 2),
+        unit: units,
+        delta: insight.load.delta === null ? null : Number(displayWeight(insight.load.delta, units).toFixed(2)),
+        foot: insight.load.to === null ? 'Bodyweight' : 'the load you repeat',
+      }),
+      stat({
+        label: 'Reps at that load',
+        value: String(insight.reps.to ?? 0),
+        delta: insight.reps.delta,
+        foot: 'across all working sets',
+      }),
+      stat({
+        label: 'Per week',
+        value: insight.perWeek ? trimNumber(displayWeight(insight.perWeek.perWeek, units), 2) : null,
+        unit: `${units}/wk`,
+        // The r² is printed, not hidden: a slope over three wobbly points looks
+        // just as confident as a real trend, and the reader is entitled to know
+        // which they are looking at.
+        foot: insight.perWeek
+          ? `est. 1RM trend · fit ${insight.perWeek.r2 === null ? '—' : insight.perWeek.r2}`
+          : 'Needs three comparable sessions',
+      }),
+    ]),
+
+    records.length
+      ? el('div', { style: { marginTop: 'var(--s-3)' } }, [
+          el('span.field__label', { text: 'Records worth beating' }),
+          el('div.stack', { style: { gap: 'var(--s-1)' } }, records.map((record) =>
+            el('div.row.row--between', { style: { gap: 'var(--s-2)' } }, [
+              el('span.t-caption.t-dim', { text: record.label }),
+              el('span.t-caption.t-semibold.tnum', {
+                text: `${trimNumber(record.unit === 'kg' ? displayWeight(record.value, units) : record.value, 2)} `
+                  + `${record.unit === 'kg' ? units : record.unit}`
+                  + `${record.current ? ' · current' : ` · ${relativeDay(record.date)}`}`,
+              }),
+            ])
+          )),
+        ])
+      : null,
+  ].filter(Boolean));
 }
 
 /* --- Volume ------------------------------------------------------------- */
 
 function volumeSection({ days, endKey, units }) {
   const weeks = analytics.volumeByWeek(days, endKey);
+  const split = analytics.volumeSplitByWeek(days, endKey);
   const muscles = analytics.volumeByMuscle(days, endKey);
   if (!weeks.length) return null;
 
+  // Working, warm-up and intensity volume as three bars rather than one total.
+  // A fortnight where warm-up volume doubled and working volume fell is a
+  // different fortnight from one where the total happened to hold, and a single
+  // number cannot say which happened.
+  const hasExtra = split.warmup.some((week) => week.value > 0)
+    || split.intensity.some((week) => week.value > 0);
+
   const volumeCard = chartCard({
     title: 'Weekly volume',
-    subtitle: 'Load moved per week, all exercises',
+    subtitle: hasExtra
+      ? 'Split by the kind of work that produced it — never summed into one figure'
+      : 'Working-set load moved per week',
     type: 'bar',
     height: 180,
     yBounds: 'zero',
-    series: [{
-      label: `Volume (${units})`,
-      points: weeks.map((week) => ({
-        date: week.date,
-        value: displayWeight(week.value, units),
-      })),
-    }],
+    series: [
+      {
+        label: `Working (${units})`,
+        points: split.working.map((week) => ({
+          date: week.date, value: displayWeight(week.value, units),
+        })),
+      },
+      ...(hasExtra ? [
+        {
+          label: `Warm-up (${units})`,
+          points: split.warmup.map((week) => ({
+            date: week.date, value: displayWeight(week.value, units),
+          })),
+        },
+        {
+          label: `Intensity (${units})`,
+          points: split.intensity.map((week) => ({
+            date: week.date, value: displayWeight(week.value, units),
+          })),
+        },
+      ] : []),
+    ],
     formatValue: (value) => compactNumber(value),
     formatLabel: (key) => weekLabelFor(weeks, key),
     valueHeader: `Volume (${units})`,
@@ -471,12 +1018,41 @@ function consistencySection({ days, endKey }) {
   });
 
   const perfect = weeks.filter((week) => week.value === 100).length;
+  const consistency = analytics.getConsistency(days, endKey);
 
   return el('section', {}, [
     sectionHead('Consistency', {
       hint: perfect ? `${perfect} of ${weeks.length} weeks complete` : null,
     }),
     track(card),
+    el('div.grid.grid--auto', { style: { marginTop: 'var(--s-3)' } }, [
+      stat({
+        label: 'Sessions a week',
+        value: consistency.perWeek === null ? null : trimNumber(consistency.perWeek, 1),
+        foot: pluralize(consistency.sessions, 'session'),
+      }),
+      stat({
+        label: 'On their own day',
+        value: `${consistency.onDay}`,
+        foot: consistency.lateSessions
+          ? `${consistency.lateSessions} trained late — counted as done`
+          : 'all of them',
+      }),
+      stat({
+        label: 'Longest gap',
+        value: consistency.longestGapDays === null ? null : String(consistency.longestGapDays),
+        unit: 'days',
+        foot: consistency.medianGapDays === null
+          ? 'Needs two sessions'
+          : `typical gap ${consistency.medianGapDays}`,
+      }),
+    ]),
+    el('p.t-caption.t-faint', {
+      text: 'A session trained a day late is a session done. The program calls the split '
+        + 'rolling rather than calendar-locked, so moving one is a normal thing to do and is '
+        + 'reported rather than penalised.',
+      style: { marginTop: 'var(--s-2)', padding: '0 var(--s-1)' },
+    }),
   ]);
 }
 
@@ -490,37 +1066,66 @@ function recordsSection() {
   const feed = prService.getRecordFeed();
   const recent = new Set(prService.getRecentRecords(21).map((r) => `${r.exerciseId}:${r.kind}`));
 
-  // One badge per exercise, showing its best estimated 1RM — the fairest
-  // cross-rep comparison — with the heaviest set as the supporting detail.
+  // One badge per exercise, headlined on the **working** record — the heaviest
+  // load actually repeated across the sets. That is the record that says what
+  // the lifter can do rather than what they once touched, and it is the one
+  // that moves when the training works. The estimated 1RM stands in where a
+  // working record has not been established.
   const badges = records
-    .filter((record) => record.e1rm)
-    .sort((a, b) => b.e1rm.value - a.e1rm.value)
-    .map((record) => {
-      const isRecent = recent.has(`${record.exerciseId}:${PR_KINDS.E1RM}`);
-      return el(`div.pr-badge${isRecent ? '.pr-badge--fresh' : ''}`, {}, [
+    .filter((record) => record.working || record.e1rm)
+    .map((record) => ({ record, headline: record.working ?? record.e1rm }))
+    .sort((a, b) => b.headline.value - a.headline.value)
+    .map(({ record, headline }) => {
+      const kind = record.working ? PR_KINDS.WORKING : PR_KINDS.E1RM;
+      const isRecent = recent.has(`${record.exerciseId}:${kind}`);
+      const classes = ['pr-badge'];
+      if (isRecent && !headline.unverified) classes.push('pr-badge--fresh');
+      if (headline.unverified) classes.push('pr-badge--unverified');
+
+      return el(`div.${classes.join('.')}`, {
+        title: headline.caveat ?? undefined,
+      }, [
         el('div.pr-badge__top', {}, [
-          icon('trophy', { size: 15 }),
-          isRecent ? el('span.pill.pill--pr', { text: 'New' }) : null,
+          icon(headline.unverified ? 'warning' : 'trophy', { size: 15 }),
+          headline.unverified
+            ? el('span.pill.pill--warning', { text: 'Check' })
+            : (isRecent ? el('span.pill.pill--pr', { text: 'New' }) : null),
         ].filter(Boolean)),
         el('div.pr-badge__name.t-truncate', { text: record.name }),
         el('div.pr-badge__value', {
-          text: `${trimNumber(displayWeight(record.e1rm.value, units), 1)} ${units}`,
+          text: `${trimNumber(displayWeight(headline.value, units), 1)} ${units}`,
         }),
         el('div.pr-badge__meta', {
-          text: `est. 1RM · ${trimNumber(displayWeight(record.e1rm.weightKg, units), 1)} × ${record.e1rm.reps}`,
+          text: record.working
+            ? `working load · ${headline.sets ?? 0} ${headline.sets === 1 ? 'set' : 'sets'}`
+            : `est. 1RM · ${trimNumber(displayWeight(headline.weightKg, units), 1)} × ${headline.reps}`,
         }),
-        el('div.pr-badge__date', { text: relativeDay(record.e1rm.date) }),
+        el('div.pr-badge__date', { text: relativeDay(headline.date) }),
       ]);
     });
+
+  const unverified = feed.filter((entry) => entry.unverified).length;
 
   return el('section', {}, [
     sectionHead('Personal records', { hint: pluralize(feed.length, 'record') }),
     el('div.pr-grid', {}, badges),
     el('p.t-caption.t-faint', {
-      text: 'Records are computed from your log, never stored — deleting a session removes any record it set.',
+      text: 'The headline is the heaviest load actually *repeated* across the working sets, not '
+        + 'the heaviest single set — that is the record that says what you can do on demand. '
+        + 'Records are computed from your log, never stored, so deleting a session removes any '
+        + 'record it set.',
       style: { marginTop: 'var(--s-2)', padding: '0 var(--s-1)' },
     }),
-  ]);
+    unverified
+      ? el('p.t-caption.t-faint', {
+          text: `${pluralize(unverified, 'record')} sits on a session where the load scale `
+            + 'changed — a different machine reading, not necessarily a stronger lift. Those are '
+            + 'marked rather than hidden: the set was performed, but the number is not comparable '
+            + 'until the machine is tagged.',
+          style: { marginTop: 'var(--s-2)', padding: '0 var(--s-1)' },
+        })
+      : null,
+  ].filter(Boolean));
 }
 
 /* --- Body composition --------------------------------------------------- */

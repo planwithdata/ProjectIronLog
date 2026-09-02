@@ -22,11 +22,18 @@ import * as programService from '../services/program-service.js';
 import * as settingsService from '../services/settings-service.js';
 import * as trainingPrefs from '../services/training-prefs-service.js';
 import * as prService from '../services/pr-service.js';
-import { repRange, difficultyRung } from '../engine/progression.js';
-import { describeLoad } from '../engine/loading.js';
+import { repRange, difficultyRung, repeatableLoad } from '../engine/progression.js';
+import { describeLoad, loadBasisLabel } from '../engine/loading.js';
+import { describeContext } from '../engine/context.js';
 import {
-  normalizeEntry, workingSets, warmupSets, intensitySequences,
-  isLegacyEntry, describeComposition, PAIN_ACTION_LABELS,
+  normalizeEntry,
+  workingSets,
+  warmupSets,
+  intensitySequences,
+  isLegacyEntry,
+  isTopSet,
+  describeComposition,
+  PAIN_ACTION_LABELS,
 } from '../engine/set-model.js';
 import { sectionHead, emptyState, stat } from '../../components/stat.js';
 import { confirmSheet, openSheet } from '../../components/sheet.js';
@@ -177,13 +184,18 @@ function detailView(sessionId) {
           session.status === 'in-progress' ? 'In progress' : null,
         ].filter(Boolean).join(' · '),
       }),
-    ]),
+      // Which day this workout belongs to, when that is not the day it
+      // happened on. Both facts are kept, so both are shown: the split stays
+      // legible and the session is not filed as a miss plus a mystery.
+      scheduleNote(session, day),
+    ].filter(Boolean)),
 
     el('div.grid.grid--auto', {}, [
       stat({
         label: 'Working sets',
         value: `${summary.completion.done}/${summary.completion.total}`,
         foot: [
+          summary.topSetCount ? `${summary.topSetCount} top` : null,
           summary.warmupSetCount ? `${summary.warmupSetCount} warm-up` : null,
           summary.dropSequences ? pluralize(summary.dropSequences, 'drop set') : null,
           summary.failureSets ? pluralize(summary.failureSets, 'failure set') : null,
@@ -256,6 +268,25 @@ function detailView(sessionId) {
 }
 
 /**
+ * "Tuesday's workout, trained on Wednesday — 1 day late."
+ *
+ * Only rendered when the two days actually differ. On a session trained on its
+ * own day there is nothing to say, and a permanent "on its day" badge would be
+ * noise on seventeen sessions out of eighteen.
+ */
+function scheduleNote(session, day) {
+  const schedule = sessionService.getSchedule(session);
+  if (!schedule || schedule.offsetDays === 0) return null;
+
+  return el('div.row', { style: { gap: 'var(--s-2)', marginTop: 'var(--s-2)', flexWrap: 'wrap' } }, [
+    el('span.pill.pill--accent', { text: schedule.label }),
+    el('span.t-caption.t-faint', {
+      text: `Scheduled for ${day?.day ?? 'another day'} · counted as completed, not missed.`,
+    }),
+  ]);
+}
+
+/**
  * One exercise's logged work, grouped by kind.
  *
  * Warm-up, working and intensity sets are shown in separate rows with their own
@@ -272,9 +303,18 @@ function entryCard(entry, units, sessionId) {
   const range = exercise ? repRange(exercise) : { max: Infinity };
   const loadPrefs = trainingPrefs.getLoadPrefs();
 
-  const chip = (set, { top = false } = {}) => {
+  const chip = (set, { top = false, probe = false } = {}) => {
     const descriptor = exercise ? describeLoad(exercise, set.weightKg, loadPrefs) : null;
-    return el(`span.set-chip${top ? '.set-chip--top' : ''}`, {}, [
+    const classes = ['set-chip'];
+    if (top) classes.push('set-chip--top');
+    if (probe) classes.push('set-chip--probe');
+
+    return el(`span.${classes.join('.')}`, {
+      title: probe
+        ? 'Logged as a heavier top set. Counted in volume and records, kept out of the load '
+          + 'the next session was built on.'
+        : undefined,
+    }, [
       el('span.set-chip__weight', {
         text: set.weightKg
           ? trimNumber(displayWeight(descriptor?.displayKg ?? set.weightKg, units), 2)
@@ -282,39 +322,63 @@ function entryCard(entry, units, sessionId) {
       }),
       el('span.set-chip__reps', { text: `× ${set.reps ?? 0}` }),
       set.rpe ? el('span.set-chip__reps', { text: ` @${set.rpe}` }) : null,
+      probe ? el('span.set-chip__reps', { text: ' ▲' }) : null,
       set.toFailure ? el('span.set-chip__reps', { text: ' → failure' }) : null,
     ]);
   };
 
-  // How the numbers in the chips should be read. Spelled out as a sentence
-  // rather than pasted in raw: "Loads shown / hand." is not English.
-  const readingNote = (() => {
-    if (!exercise || !working.length) return null;
-    switch (describeLoad(exercise, working[0]?.weightKg ?? null, loadPrefs).qualifier) {
-      case '/ hand':   return 'Loads shown per hand.';
-      case 'plates':   return 'Loads shown as plates; the bar is not included.';
-      case 'per side': return 'Loads shown as the machine value, per side.';
-      case 'total':    return 'Loads shown as the total of both dumbbells.';
-      default:         return null;
-    }
-  })();
+  // How the numbers in the chips should be read. Delegated to the loading
+  // engine rather than re-derived from a qualifier string: there is now one
+  // place that knows what a stored load means, and a switch statement here
+  // duplicating it was already one convention behind.
+  const readingNote = exercise && working.length
+    ? `Loads shown: ${lowerFirst(loadBasisLabel(exercise, loadPrefs))}.`
+    : null;
+
+  const substitution = live.substitution ?? null;
+  const performed = substitution
+    ? programService.getExercise(substitution.performedId)
+    : null;
+  const contextLabel = describeContext(live);
+  const repeatable = repeatableLoad({ sets: working });
+  const plannedKg = entry.targetWeightKg;
+  // The plan and the performance, side by side, when they differ. Both are
+  // stored and neither overwrites the other — so both get shown.
+  const deviated = plannedKg !== null && plannedKg !== undefined
+    && repeatable !== null && Math.abs(plannedKg - repeatable) > 0.01;
 
   return el('article.card', {}, [
     el('div.row.row--between', { style: { alignItems: 'flex-start' } }, [
       el('div', { style: { minWidth: 0 } }, [
-        el('div.t-callout.t-semibold', { text: exercise?.name ?? entry.exerciseId }),
+        el('div.t-callout.t-semibold', {
+          // The movement actually performed leads, with the slot it filled
+          // named beneath: what was trained is the more useful headline, and
+          // the slot is what keeps the session's adherence.
+          text: performed?.name ?? substitution?.label ?? exercise?.name ?? entry.exerciseId,
+        }),
         el('div.t-caption.t-faint', {
           text: describeComposition(live) || 'Skipped',
         }),
-      ]),
-      el('div.row', { style: { gap: 'var(--s-1)', flexWrap: 'wrap', justifyContent: 'flex-end' } }, [
-        legacy ? el('span.pill', { text: 'unclassified' }) : null,
-        entry.targetWeightKg !== null && entry.targetWeightKg !== undefined && exercise
-          ? el('span.pill', {
-              text: `target ${formatLoad(describeLoad(exercise, entry.targetWeightKg, loadPrefs), units)}`,
+        substitution
+          ? el('div.t-caption.t-dim', {
+              text: `in place of ${exercise?.name ?? entry.exerciseId}`
+                + (substitution.comparableLoad ? '' : ' · own load history'),
             })
           : null,
-      ]),
+      ].filter(Boolean)),
+      el('div.row', { style: { gap: 'var(--s-1)', flexWrap: 'wrap', justifyContent: 'flex-end' } }, [
+        legacy ? el('span.pill', { text: 'unclassified' }) : null,
+        substitution ? el('span.pill.pill--warning', { text: 'substituted' }) : null,
+        contextLabel ? el('span.pill', { text: contextLabel }) : null,
+        plannedKg !== null && plannedKg !== undefined && exercise
+          ? el(`span.pill${deviated ? '.pill--warning' : ''}`, {
+              text: `planned ${formatLoad(describeLoad(exercise, plannedKg, loadPrefs), units)}`,
+              title: deviated
+                ? 'Performed at a different load. Both are kept: the plan, and what you did.'
+                : undefined,
+            })
+          : null,
+      ].filter(Boolean)),
     ]),
 
     warmups.length
@@ -330,8 +394,25 @@ function entryCard(entry, units, sessionId) {
             text: legacy ? 'LOGGED SETS' : 'WORKING SETS',
           }),
           el('div.session-detail__sets', {},
-            working.map((set) => chip(set, { top: (set.reps ?? 0) >= range.max }))),
-        ])
+            // `top` here marks a set that *hit the top of its rep range* —
+            // an existing visual. A set logged as a heavier probe is a
+            // different thing and gets its own marker.
+            working.map((set) => chip(set, {
+              top: (set.reps ?? 0) >= range.max,
+              probe: isTopSet(set),
+            }))),
+          // Which of those loads the next session was built on. Without this a
+          // 55 / 55 / 72 session reads as "72 kg day" a month later, which is
+          // exactly the misreading that produced this build.
+          repeatable !== null && working.some((set) => (set.weightKg ?? 0) !== repeatable)
+            ? el('div.t-micro.t-faint', {
+                text: `Working load read as `
+                  + `${formatLoad(describeLoad(exercise, repeatable, loadPrefs), units)}`
+                  + `${live.sets.some(isTopSet) ? ' — the heavier set is marked as a probe.' : ' — the load repeated across the sets.'}`,
+                style: { marginTop: '2px' },
+              })
+            : null,
+        ].filter(Boolean))
       : null,
 
     ...sequences.map((sequence) => el('div', { style: { marginTop: 'var(--s-2)' } }, [
@@ -385,6 +466,10 @@ function entryCard(entry, units, sessionId) {
   ]);
 }
 
+function lowerFirst(text) {
+  return text ? text.charAt(0).toLowerCase() + text.slice(1) : text;
+}
+
 /**
  * Ask which of a legacy entry's sets were ramps.
  *
@@ -407,6 +492,11 @@ async function openReclassifySheet(sessionId, entry, exercise, units) {
     }, [
       el('option', { value: 'working', text: 'Working set', selected: true }),
       el('option', { value: 'warmup', text: 'Warm-up / ramp' },),
+      // A heavier probe. Stays in the working array, in place, and is kept out
+      // of the load the next session is built on — which is what makes it the
+      // right answer for week one's top sets rather than "warm-up", since a
+      // ramp's top rung was genuinely worked at.
+      el('option', { value: 'top', text: 'Heavier top set' }),
       el('option', { value: 'drop', text: 'Drop-set stage' }),
     ]);
 
@@ -419,8 +509,9 @@ async function openReclassifySheet(sessionId, entry, exercise, units) {
   const choice = await openSheet({
     title: 'Classify these sets',
     text: `${exercise?.name ?? 'This exercise'} was logged before warm-up tracking existed, so `
-      + 'the app does not know which sets were ramps. Nothing changes unless you say so — the '
-      + 'weights and reps are untouched either way.',
+      + 'the app does not know which sets were ramps and which were worked at. Nothing changes '
+      + 'unless you say so — the weights and reps are untouched either way, and only what each '
+      + 'set is *called* decides whether it can set a future target.',
     body: el('div.stack', { style: { gap: 'var(--s-3)' } }, rows),
     actions: [
       { label: 'Save', value: true, tone: 'primary' },

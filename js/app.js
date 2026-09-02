@@ -22,7 +22,6 @@ import { mountToastHost } from '../components/toast.js';
 import * as pwa from './services/pwa-service.js';
 import { UPDATE_READY } from './services/pwa-service.js';
 import { openSheet } from '../components/sheet.js';
-import { APP_VERSION } from './config.js';
 
 
 /**

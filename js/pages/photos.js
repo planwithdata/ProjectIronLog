@@ -18,7 +18,7 @@ import { formatDate, relativeDay, today, daysBetween, pluralize } from '../core/
 import { formatBytes } from '../core/download.js';
 import { photos, PHOTO_CATEGORIES } from '../services/logs-service.js';
 import * as photoStore from '../services/photo-store.js';
-import { sectionHead, stat, emptyState } from '../../components/stat.js';
+import { sectionHead } from '../../components/stat.js';
 import { confirmSheet } from '../../components/sheet.js';
 
 /** Every object URL this page has created, revoked on teardown. */

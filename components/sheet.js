@@ -18,7 +18,11 @@ import { el, icon } from '../js/core/dom.js';
  * @param {object} options
  * @param {string} options.title
  * @param {string} [options.text]
- * @param {Node|Node[]} [options.body]      custom content, below the text
+ * @param {Node|Node[]|((finish: (value: any) => void) => Node|Node[])} [options.body]
+ *        Custom content, below the text. Passing a *function* gets it the
+ *        sheet's own `finish`, which lets content inside the body resolve the
+ *        sheet — a tappable list of choices, rather than a list plus a
+ *        separate Confirm button that does the same thing twice.
  * @param {Array<{label: string, value: any, tone?: 'primary'|'danger'|'plain'}>} options.actions
  * @param {boolean} [options.dismissible]   allow backdrop/Escape close
  * @returns {Promise<any>} the chosen action's `value`, or null if dismissed
@@ -47,6 +51,8 @@ export function openSheet({
       })
     );
 
+    const content = typeof body === 'function' ? body(finish) : body;
+
     const dialog = el('dialog.sheet', {
       'aria-labelledby': 'sheet-title',
     }, [
@@ -54,7 +60,7 @@ export function openSheet({
         el('div.sheet__grip', { 'aria-hidden': 'true' }),
         el('h2.sheet__title', { id: 'sheet-title', text: title }),
         text ? el('p.sheet__text', { text }) : null,
-        body ? el('div.sheet__body', {}, body) : null,
+        content ? el('div.sheet__body', {}, content) : null,
         el('div.sheet__actions', {}, buttons),
       ]),
     ]);
@@ -114,6 +120,60 @@ export async function confirmSheet({
     ],
   });
   return result === true;
+}
+
+/**
+ * A sheet whose content *is* the choice: a tappable list, one row per option,
+ * resolving to the picked option's `value`.
+ *
+ * Used wherever the question is "which one" rather than "yes or no" — which
+ * workout to do today, which machine this is, which substitute was performed.
+ * Each row carries a second line, because in every one of those cases the
+ * consequence of the choice is the thing that decides it: when a workout was
+ * last done, whether a machine's loads are comparable, whether a substitute
+ * keeps its own history.
+ *
+ * @param {object} options
+ * @param {string} options.title
+ * @param {string} [options.text]
+ * @param {Array<{value: any, label: string, sub?: string, tone?: string,
+ *                iconName?: string, selected?: boolean, disabled?: boolean}>} options.choices
+ * @param {string} [options.cancelLabel]
+ * @param {Array<object>} [options.extraActions]  buttons alongside Cancel
+ * @returns {Promise<any>} the chosen `value`, or null on dismissal
+ */
+export function openChoiceSheet({
+  title,
+  text = '',
+  choices = [],
+  cancelLabel = 'Cancel',
+  extraActions = [],
+}) {
+  return openSheet({
+    title,
+    text,
+    body: (finish) => el('div.choice-list', {}, choices.map((choice) =>
+      el(`button.choice-list__row${choice.tone ? `.choice-list__row--${choice.tone}` : ''}`, {
+        type: 'button',
+        disabled: Boolean(choice.disabled),
+        'aria-current': choice.selected ? 'true' : null,
+        on: { click: () => finish(choice.value) },
+      }, [
+        choice.iconName
+          ? el('span.choice-list__icon', {}, [icon(choice.iconName, { size: 17 })])
+          : null,
+        el('span.choice-list__body', {}, [
+          el('span.choice-list__label', { text: choice.label }),
+          choice.sub ? el('span.choice-list__sub', { text: choice.sub }) : null,
+        ]),
+        choice.selected ? icon('check', { size: 16, className: 'choice-list__tick' }) : null,
+      ].filter(Boolean))
+    )),
+    actions: [
+      ...extraActions,
+      { label: cancelLabel, value: false, tone: 'plain' },
+    ],
+  });
 }
 
 /** A labelled row for use inside a sheet body — used by the workout summary. */

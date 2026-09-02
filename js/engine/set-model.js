@@ -30,7 +30,26 @@
  *     intensitySets: [ { id, type, note, stages: [...] } ],
  *     pain:          null | { score, location, note, action, alternativeId },
  *     difficulty:    null | string,
+ *     context:       null | { machineId, label, attachment, note },
+ *     substitution:  null | { performedId, plannedId, label, comparableLoad },
  *   }
+ *
+ * `sets` holds two kinds of set, not one. Most are `working` — a load meant to
+ * be repeated across every set. One may be `top`: a heavier probe taken above
+ * the working load. Both are real training and both count everywhere except in
+ * the one place it matters, which is the load the *next* session is built on.
+ * `repeatableSets` is the filtered view the progression engine reads.
+ *
+ * `context` records *which* machine the numbers came off. A cable stack reading
+ * 4.5 on one machine and 10 on the next is the same effort, so the app compares
+ * loads only within one context and says so when the context changes. See
+ * `engine/context.js`.
+ *
+ * `substitution` records that a different movement was performed in a planned
+ * slot — a bar pushdown where the program says rope. The work is kept, credited
+ * to the slot for adherence, and its loads are kept out of the planned
+ * movement's load history, because an attachment change is not a strength
+ * change.
  *
  * `setModel: 'legacy'` marks an entry logged before the distinction existed.
  * Its sets are preserved byte for byte and are *not* reclassified by guesswork
@@ -39,8 +58,19 @@
 
 /** What a single logged set is. */
 export const SET_KIND = {
-  /** A prescribed working set. The only kind progression may read. */
+  /** A prescribed working set. The load progression is measured from. */
   WORKING: 'working',
+  /**
+   * A heavier single set taken above the working load — a probe, not a load
+   * you repeat.
+   *
+   * It lives in `entry.sets` because it *is* a working set in every sense
+   * except the one that matters to the engine: it is not repeatable. So it
+   * counts towards volume, completion, history and the heaviest-weight record,
+   * and it is excluded from the load the next session is built on. See
+   * `progression.repeatableLoad`.
+   */
+  TOP: 'top',
   /** A ramp-up set on the way to the working weight. */
   WARMUP: 'warmup',
   /** One rung of a drop-set sequence. */
@@ -103,6 +133,8 @@ export function normalizeEntry(entry) {
     intensitySets: Array.isArray(entry.intensitySets) ? entry.intensitySets : [],
     pain: entry.pain ?? null,
     difficulty: entry.difficulty ?? null,
+    context: entry.context ?? null,
+    substitution: entry.substitution ?? null,
     setModel: entry.setModel ?? 'legacy',
   };
 }
@@ -115,6 +147,39 @@ export function workingSets(entry) {
 /** Working sets that were actually completed with a real rep count. */
 export function completedWorkingSets(entry) {
   return workingSets(entry).filter((set) => set.completed && (set.reps ?? 0) > 0);
+}
+
+/** Was this set logged as a heavier probe rather than a repeatable working set? */
+export function isTopSet(set) {
+  return set?.kind === SET_KIND.TOP;
+}
+
+/**
+ * Working sets that represent a *repeatable* load — everything in `sets`
+ * except the ones explicitly marked as a heavier top set.
+ *
+ * This is the view the progression engine measures the next load from. It is
+ * deliberately a filter rather than a separate array: a top set has to appear
+ * in the middle of the working sets, in the order it was performed, or the
+ * history stops describing the session that happened.
+ *
+ * Falls back to every working set when *all* of them were marked as top sets,
+ * because a session with no repeatable load at all still has to prescribe
+ * something, and the honest reading of "all probes" is "these were the sets".
+ */
+export function repeatableSets(entry) {
+  const all = workingSets(entry);
+  const repeatable = all.filter((set) => !isTopSet(set));
+  return repeatable.length ? repeatable : all;
+}
+
+/** The heavier probes in an entry, if any were marked. */
+export function topSets(entry) {
+  return workingSets(entry).filter(isTopSet);
+}
+
+export function hasTopSet(entry) {
+  return topSets(entry).length > 0;
 }
 
 export function warmupSets(entry) {
@@ -202,9 +267,14 @@ export function composition(entry) {
   const legacy = isLegacyEntry(entry);
   const sequences = intensitySequences(entry);
 
+  const tops = working.filter(isTopSet);
+  const repeatable = working.filter((set) => !isTopSet(set));
+
   return {
-    working: legacy ? 0 : working.length,
-    workingDone: legacy ? 0 : working.filter((set) => set.completed).length,
+    working: legacy ? 0 : repeatable.length,
+    workingDone: legacy ? 0 : repeatable.filter((set) => set.completed).length,
+    top: legacy ? 0 : tops.length,
+    topDone: legacy ? 0 : tops.filter((set) => set.completed).length,
     legacy: legacy ? working.length : 0,
     legacyDone: legacy ? working.filter((set) => set.completed).length : 0,
     warmup: warmupSets(entry).length,
@@ -229,6 +299,7 @@ export function describeComposition(entry) {
   const parts = [];
 
   if (counts.working) parts.push(plural(counts.working, 'working set'));
+  if (counts.top) parts.push(plural(counts.top, 'heavy top set'));
   if (counts.legacy) parts.push(`${plural(counts.legacy, 'set')} (unclassified)`);
   if (counts.warmup) parts.push(plural(counts.warmup, 'warm-up set'));
   if (counts.dropSequences) parts.push(plural(counts.dropSequences, 'drop-set sequence'));

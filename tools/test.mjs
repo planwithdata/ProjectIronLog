@@ -23,9 +23,15 @@ import {
   incrementFor,
   programIncrement,
   workingWeight,
+  repeatableLoad,
+  repsAtLoad,
   baselineWeight,
   ACTIONS,
 } from '../js/engine/progression.js';
+
+import {
+  contextKey, compareLoads, markDiscontinuities, segments, DEFAULT_CONTEXT,
+} from '../js/engine/context.js';
 
 import { estimate1rm, loadForReps } from '../js/engine/one-rep-max.js';
 
@@ -341,8 +347,12 @@ function ramp(weights, reps, { date = '2026-08-01' } = {}) {
   };
 }
 
-test('baselineWeight defaults to the heaviest completed set', () => {
-  assert.equal(baselineWeight(ramp([150, 180, 200, 220], [12, 10, 8, 6])), 220);
+test('baselineWeight defaults to the repeatable load, not the heaviest set', () => {
+  // A week-one ramp logged as working sets. The heaviest set was a probe; the
+  // load that would survive four sets is the second rung.
+  assert.equal(baselineWeight(ramp([150, 180, 200, 220], [12, 10, 8, 6])), 180);
+  assert.equal(workingWeight(ramp([150, 180, 200, 220], [12, 10, 8, 6])), 220,
+    'the heaviest set is still reported as such');
 });
 
 test('baselineWeight reads the nominated set, 1-based', () => {
@@ -369,7 +379,7 @@ test('baselineWeight counts completed sets only, in logged order', () => {
   assert.equal(baselineWeight(entry, 2), 13.6);
 });
 
-test('baselineWeight falls back to the heaviest set when the index cannot answer', () => {
+test('baselineWeight falls back to the repeatable load when the index cannot answer', () => {
   const short = ramp([40], [8]);
   assert.equal(baselineWeight(short, 2), 40, 'fewer sets than the index');
 
@@ -379,32 +389,36 @@ test('baselineWeight falls back to the heaviest set when the index cannot answer
   ] };
   assert.equal(baselineWeight(bodyweight, 2), null, 'nothing loaded to read');
 
-  assert.equal(baselineWeight(ramp([20, 25], [8, 8]), 0), 25, 'index 0 is not a set');
+  assert.equal(baselineWeight(ramp([20, 25], [8, 8]), 0), 20, 'index 0 is not a set');
 });
 
-test('a rebaselined hold prescribes the second set, not the top set', () => {
+test('a ramp logged as working sets prescribes the repeatable rung by default', () => {
   const squat = exercise({
-    id: 'back-squat', equipment: 'barbell', loadEntry: 'plates', sets: 4,
+    id: 'hack-squat', equipment: 'machine', loadEntry: 'machine', sets: 4,
   });
   const week1 = [ramp([150, 180, 200, 220], [12, 10, 8, 6])];
 
   const asLogged = recommend(squat, week1, { setCount: 4 });
-  assert.equal(asLogged.weightKg, 220, 'unchanged without the override');
+  assert.equal(asLogged.action, ACTIONS.HOLD);
+  assert.equal(asLogged.weightKg, 180, 'the second rung, with no dated override needed');
+  assert.match(asLogged.reason, /load you actually repeated/, 'the card says why');
+  assert.equal(asLogged.previous.topWeightKg, 220, 'what was lifted is still reported');
 
+  // The explicit override still works, and now agrees with the default.
   const rebased = recommend(squat, week1, { setCount: 4, baselineSetIndex: 2 });
-  assert.equal(rebased.action, ACTIONS.HOLD);
   assert.equal(rebased.weightKg, 180);
-  assert.match(rebased.reason, /working set 2/, 'the card has to say why the load dropped');
-  assert.equal(rebased.previous.topWeightKg, 220, 'what was lifted is still reported');
+  assert.match(rebased.reason, /working set 2/, 'an explicit override names the set');
 });
 
-test('a rebaselined advance adds the increment to the second set', () => {
-  const press = exercise({ sets: 3 });                      // dumbbells, +2.5/hand
-  const atTop = [ramp([40, 50, 55], [8, 8, 8])];
+test('one set at the repeatable load does not earn an advance', () => {
+  // 40/50/55 at 8/8/8 is a ramp shape: only one set was performed at 50, so 50
+  // has not been held for three sets and 55 was never held twice at all.
+  const press = exercise({ sets: 3 });
+  const result = recommend(press, [ramp([40, 50, 55], [8, 8, 8])], { setCount: 3 });
 
-  const rebased = recommend(press, atTop, { setCount: 3, baselineSetIndex: 2 });
-  assert.equal(rebased.action, ACTIONS.ADVANCE);
-  assert.equal(rebased.weightKg, 55, '50 kg + the 5 kg stored step');
+  assert.equal(result.action, ACTIONS.HOLD, 'not an advance on one qualifying set');
+  assert.equal(result.weightKg, 50, 'held at the repeatable load');
+  assert.match(result.reason, /1 of 3 sets/, 'and it says why it is not earned');
 });
 
 test('the override is a no-op on sets that were already flat', () => {
@@ -433,6 +447,300 @@ test('the override leaves rep targets and stall detection alone', () => {
   assert.deepEqual(rebased.perSetReps, plain.perSetReps);
   // 180 x 0.9 = 162, rounded to the 2.5 kg step. Off 200 it would be 180.
   assert.equal(rebased.weightKg, 162.5, '10% off the 180 kg baseline, not off 200');
+});
+
+/* --- Repeatable load vs heaviest set -----------------------------------
+   The bug this section exists for: a single 72 kg flat dumbbell bench set
+   logged among 55 kg working sets became the prescription for all three sets of
+   the following week, at a load that had never been held twice.
+   ====================================================================== */
+
+test('repeatableLoad reads the load at least half the sets were performed at', () => {
+  assert.equal(repeatableLoad(performance(55, [8, 8, 8])), 55, 'uniform sets');
+  assert.equal(repeatableLoad(ramp([55, 55, 72], [9, 8, 5])), 55, 'two working sets and a probe');
+  assert.equal(repeatableLoad(ramp([150, 180, 200, 220], [12, 10, 8, 6])), 180, 'a ramp');
+  assert.equal(repeatableLoad(ramp([45, 55], [12, 5])), 45, 'neither load repeated');
+  assert.equal(repeatableLoad({ sets: [] }), null, 'nothing logged');
+
+  const bodyweight = { sets: [{ weightKg: null, reps: 8, completed: true }] };
+  assert.equal(repeatableLoad(bodyweight), null, 'bodyweight work carries no load');
+});
+
+test('a set marked as a top set is excluded outright', () => {
+  const entry = {
+    sets: [
+      { weightKg: 55, reps: 9, completed: true, kind: 'working' },
+      { weightKg: 55, reps: 8, completed: true, kind: 'working' },
+      { weightKg: 55, reps: 8, completed: true, kind: 'working' },
+      { weightKg: 72, reps: 5, completed: true, kind: 'top' },
+    ],
+  };
+  assert.equal(repeatableLoad(entry), 55, 'the probe does not vote');
+  assert.equal(workingWeight(entry), 72, 'but it is still the heaviest set lifted');
+});
+
+test('every set marked as a top set still yields a prescription', () => {
+  const entry = {
+    sets: [
+      { weightKg: 60, reps: 5, completed: true, kind: 'top' },
+      { weightKg: 70, reps: 3, completed: true, kind: 'top' },
+    ],
+  };
+  assert.equal(repeatableLoad(entry), 60, 'falls back rather than returning nothing');
+});
+
+test("the real flat-bench regression: 55/55/72 prescribes 55, not 72", () => {
+  const bench = exercise({
+    id: 'flat-dumbbell-bench-press', sets: 3,
+    reps: { min: 8, max: 10, label: '8-10' },
+    progression: { mode: 'weight', increment: { min: 2, max: 2.5 } },
+  });
+
+  const result = recommend(bench, [
+    ramp([55, 55, 72], [9, 8, 5], { date: '2026-08-25' }),
+    performance(55, [8, 6, 6], { date: '2026-08-18' }),
+  ], { setCount: 3 });
+
+  assert.equal(result.action, ACTIONS.HOLD);
+  assert.equal(result.weightKg, 55, 'the load actually repeated');
+  assert.deepEqual(result.perSetReps, [10, 9, 8],
+    'set three gets the weakest reading at 55, not the 5 reps done at 72');
+  assert.equal(result.previous.topWeightKg, 72, 'the probe is still on the record');
+});
+
+test('reps performed at another load cannot set a target for this one', () => {
+  assert.deepEqual(repsAtLoad(ramp([55, 55, 72], [9, 8, 5]), 55), [9, 8, null]);
+  assert.deepEqual(repsAtLoad(ramp([72, 55, 55], [5, 9, 8]), 55), [null, 9, 8]);
+});
+
+test('a top set placed first does not block an earned advance', () => {
+  // Worked up to a probe, then three clean sets at the working load.
+  const press = exercise({ sets: 3, reps: { min: 6, max: 8, label: '6-8' } });
+  const result = recommend(press, [ramp([70, 55, 55, 55], [4, 8, 8, 8])], { setCount: 3 });
+
+  assert.equal(result.action, ACTIONS.ADVANCE, 'three sets at 55 hit the top of the range');
+  assert.equal(result.weightKg, 60, '55 + the 5 kg stored step');
+});
+
+test('one strong set does not carry a session: 12/8/8 is not 12/12/12', () => {
+  const curl = exercise({
+    id: 'hammer-curl', sets: 3, reps: { min: 10, max: 12, label: '10-12' },
+    progression: { mode: 'weight', increment: { min: 1, max: 2 } },
+  });
+
+  const uneven = recommend(curl, [performance(25, [12, 8, 8])], { setCount: 3 });
+  const even = recommend(curl, [performance(25, [12, 12, 12])], { setCount: 3 });
+
+  assert.equal(uneven.action, ACTIONS.HOLD, '12/8/8 holds');
+  // 8 + 1 is still below the prescribed 10, so those sets target the bottom of
+  // the range rather than a number the program never asked for.
+  assert.deepEqual(uneven.perSetReps, [12, 10, 10]);
+  assert.match(uneven.reason, /12\/8\/8/, 'the reason names the spread');
+  assert.equal(even.action, ACTIONS.ADVANCE, '12/12/12 earns the load');
+});
+
+test('planned and performed loads are both reported, not merged', () => {
+  const press = exercise({ id: 'incline-smith-machine-press', equipment: 'smith-machine',
+    loadEntry: 'plates', sets: 4 });
+
+  const performed = { ...performance(45, [8, 8, 7, 6], { date: '2026-08-29' }), targetWeightKg: 40 };
+  const result = recommend(press, [performed], { setCount: 4 });
+
+  assert.equal(result.previous.targetWeightKg, 40, 'the plan survives');
+  assert.equal(result.previous.weightKg, 45, 'so does what was actually done');
+  assert.deepEqual(result.previous.deviation, { plannedKg: 40, performedKg: 45, deltaKg: 5 });
+  assert.equal(result.weightKg, 45, 'today builds on the performance');
+  assert.match(result.reason, /planned at 40 kg and performed at 45 kg/);
+});
+
+test('no deviation is reported when the plan was followed', () => {
+  const press = exercise({ sets: 3 });
+  const followed = { ...performance(50, [7, 7, 7], { date: '2026-08-29' }), targetWeightKg: 50 };
+  const result = recommend(press, [followed], { setCount: 3 });
+
+  assert.equal(result.previous.deviation, null);
+  assert.doesNotMatch(result.reason, /planned at/);
+});
+
+/* --- Load scales that are not comparable -------------------------------- */
+
+test('compareLoads separates a machine change from a programmed increment', () => {
+  assert.equal(compareLoads(4.5, 10).discontinuous, true, 'a different cable stack');
+  assert.equal(compareLoads(9.1, 20).discontinuous, true);
+  assert.equal(compareLoads(20, 50).discontinuous, true);
+  assert.equal(compareLoads(18.1, 40).discontinuous, true);
+
+  assert.equal(compareLoads(13.6, 15.9).discontinuous, false, '30 lb to 35 lb is training');
+  assert.equal(compareLoads(4.5, 5.5).discontinuous, false, 'small load, small absolute step');
+  assert.equal(compareLoads(180, 182.5).discontinuous, false);
+  assert.equal(compareLoads(57, 57).discontinuous, false);
+  assert.equal(compareLoads(null, 20).discontinuous, false, 'nothing to compare against');
+});
+
+test('a cable load that doubles is re-anchored, not treated as progress', () => {
+  const fly = exercise({
+    id: 'low-to-high-cable-fly', equipment: 'cable', loadType: 'per-hand',
+    loadEntry: 'machine', sets: 3, reps: { min: 12, max: 15, label: '12-15' },
+    progression: { mode: 'weight', increment: { min: 1, max: 2 } },
+  });
+
+  const result = recommend(fly, [
+    performance(10, [15, 15, 15], { date: '2026-09-01' }),
+    performance(4.5, [14, 14, 13], { date: '2026-08-25' }),
+    performance(4.5, [13, 13, 12], { date: '2026-08-18' }),
+  ], { setCount: 3 });
+
+  assert.equal(result.action, ACTIONS.RE_ANCHOR, 'not an advance off a scale change');
+  assert.equal(result.weightKg, 10, 'works from the reading actually logged');
+  assert.equal(result.previous.discontinuous, true);
+  assert.match(result.reason, /different machine/);
+});
+
+test('the same jump on dumbbells is read as training, because 10 kg is 10 kg', () => {
+  const raise = exercise({
+    id: 'dumbbell-lateral-raise', equipment: 'dumbbell', loadEntry: 'total-both',
+    sets: 3, reps: { min: 12, max: 15, label: '12-15' },
+    progression: { mode: 'weight', increment: { min: 1, max: 2 } },
+  });
+
+  const result = recommend(raise, [
+    performance(20, [15, 15, 15], { date: '2026-09-01' }),
+    performance(14, [13, 13, 12], { date: '2026-08-25' }),
+  ], { setCount: 3 });
+
+  assert.equal(result.action, ACTIONS.ADVANCE, 'a dumbbell reading is a mass, not a scale');
+});
+
+test('no stall is counted across a load scale change', () => {
+  const pushdown = exercise({
+    id: 'rope-triceps-pushdown', equipment: 'cable', loadEntry: 'machine',
+    sets: 3, reps: { min: 10, max: 12, label: '10-12' },
+    progression: { mode: 'weight', increment: { min: 1, max: 2 } },
+  });
+
+  // Three flat sessions, then a machine change. Without the break the flat run
+  // would deload the new machine's load by 10% for sins committed on another.
+  const result = recommend(pushdown, [
+    performance(50, [10, 10, 10], { date: '2026-09-01' }),
+    performance(9.1, [11, 11, 11], { date: '2026-08-25' }),
+    performance(9.1, [11, 11, 11], { date: '2026-08-18' }),
+    performance(9.1, [11, 11, 11], { date: '2026-08-11' }),
+  ], { setCount: 3 });
+
+  assert.notEqual(result.action, ACTIONS.DELOAD_STALL);
+  assert.equal(result.stalledSessions, 0);
+});
+
+test('a declared context with no history says so instead of guessing', () => {
+  const pushdown = exercise({
+    id: 'rope-triceps-pushdown', equipment: 'cable', loadEntry: 'machine', sets: 3,
+    reps: { min: 10, max: 12, label: '10-12' },
+  });
+  const history = [{
+    ...performance(9.1, [11, 11, 11], { date: '2026-08-25' }),
+    context: { machineId: 'stack-a', label: 'Stack A', attachment: 'rope' },
+  }];
+
+  const result = recommend(pushdown, history, {
+    setCount: 3,
+    contextKey: contextKey({ context: { machineId: 'stack-b', attachment: 'rope' } }),
+  });
+
+  assert.equal(result.action, ACTIONS.RE_ANCHOR);
+  assert.match(result.reason, /First session logged on this machine/);
+});
+
+test('contextKey folds case and spacing, and separates attachments', () => {
+  assert.equal(contextKey(null), DEFAULT_CONTEXT);
+  assert.equal(contextKey({}), DEFAULT_CONTEXT);
+  assert.equal(
+    contextKey({ context: { machineId: 'Stack A', attachment: 'Rope' } }),
+    contextKey({ context: { machineId: 'stack  a', attachment: 'rope' } })
+  );
+  assert.notEqual(
+    contextKey({ context: { machineId: 'stack-a', attachment: 'rope' } }),
+    contextKey({ context: { machineId: 'stack-a', attachment: 'bar' } })
+  );
+  assert.notEqual(
+    contextKey({ substitution: { performedId: 'bar-triceps-pushdown', comparableLoad: false } }),
+    DEFAULT_CONTEXT
+  );
+});
+
+test('markDiscontinuities and segments break the series where the scale changed', () => {
+  const marked = markDiscontinuities([
+    { date: '2026-08-11', loadKg: 9.1 },
+    { date: '2026-08-18', loadKg: 9.1 },
+    { date: '2026-08-25', loadKg: 20 },
+    { date: '2026-09-01', loadKg: 21 },
+  ]);
+
+  assert.deepEqual(marked.map((point) => point.discontinuous), [false, false, true, false]);
+  assert.deepEqual(segments(marked).map((run) => run.points.length), [2, 2]);
+});
+
+test('detection is off for movements whose numbers are a mass', () => {
+  const marked = markDiscontinuities(
+    [{ date: '2026-08-01', loadKg: 20 }, { date: '2026-08-08', loadKg: 45 }],
+    { machineScaled: false }
+  );
+  assert.equal(marked[1].discontinuous, false);
+  assert.equal(marked[1].comparable, true);
+});
+
+/* --- Maintained work ---------------------------------------------------- */
+
+test('a maintained movement holds its load and never advances', () => {
+  const pallof = exercise({
+    id: 'pallof-press', equipment: 'cable', loadType: 'total', loadEntry: 'machine',
+    sets: 2, reps: { min: 12, max: 12, perSide: true, label: '12/side' },
+    progression: { mode: 'maintain', increment: { min: 1, max: 2 } },
+  });
+
+  const result = recommend(pallof, [performance(15, [12, 12], { date: '2026-09-01' })], {
+    setCount: 2,
+  });
+
+  assert.equal(result.action, ACTIONS.MAINTAIN);
+  assert.equal(result.weightKg, 15, 'holds the load it was logged at');
+  assert.deepEqual(result.perSetReps, [12, 12]);
+  assert.match(result.reason, /Not a progression lift/);
+  assert.equal(result.stalledSessions, 0);
+});
+
+test('a maintained movement never earns an advance, even at the top of its range', () => {
+  const pallof = exercise({
+    id: 'pallof-press', loadEntry: 'machine', sets: 2,
+    reps: { min: 12, max: 12, label: '12/side' },
+    progression: { mode: 'maintain', increment: { min: 1, max: 2 } },
+  });
+  const done = [
+    { weightKg: 15, reps: 12, completed: true },
+    { weightKg: 15, reps: 12, completed: true },
+  ];
+  assert.equal(earnedAdvance(pallof, done), false);
+});
+
+test('a maintained movement never stall-deloads', () => {
+  const pallof = exercise({
+    id: 'pallof-press', loadEntry: 'machine', sets: 2,
+    reps: { min: 12, max: 12, label: '12/side' },
+    progression: { mode: 'maintain', increment: { min: 1, max: 2 } },
+  });
+  const flat = ['2026-09-01', '2026-08-25', '2026-08-18', '2026-08-11']
+    .map((date) => performance(15, [12, 12], { date }));
+
+  assert.equal(recommend(pallof, flat, { setCount: 2 }).action, ACTIONS.MAINTAIN);
+});
+
+test('a maintained movement still respects the deload week', () => {
+  const pallof = exercise({
+    id: 'pallof-press', loadEntry: 'machine', sets: 2,
+    reps: { min: 12, max: 12, label: '12/side' },
+    progression: { mode: 'maintain', increment: { min: 1, max: 2 } },
+  });
+  const result = recommend(pallof, [performance(20, [12, 12])], { setCount: 2, isDeload: true });
+  assert.equal(result.weightKg, 13, '20 kg at ~65%, rounded to the 1 kg step');
 });
 
 /* --- earnedAdvance ----------------------------------------------------- */

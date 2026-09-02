@@ -9,15 +9,21 @@ import { today } from '../core/format.js';
 import * as sessionService from './session-service.js';
 import * as programService from './program-service.js';
 import * as bodyService from './body-service.js';
-import { estimate1rm } from '../engine/one-rep-max.js';
 import { volumeMultiplier } from '../engine/loading.js';
 import { normalizeEntry, entryVolume } from '../engine/set-model.js';
+import { explainBreak } from '../engine/context.js';
 import {
   rollingAverage, trendPerWeek, byWeek, fillWeeks, withinDays,
   summarise, niceBounds, weekStart,
 } from '../engine/analytics.js';
+import {
+  exerciseInsight, scorecard, driverMix, muscleProgress, meaningfulRecords,
+  byWaveWeek, deloadResponse, adherence, consistency,
+  STATUS, STATUS_LABELS, DRIVER, DRIVER_LABELS,
+} from '../engine/insights.js';
 
 export { summarise, niceBounds, trendPerWeek };
+export { STATUS, STATUS_LABELS, DRIVER, DRIVER_LABELS, explainBreak };
 
 /** The range filter's options. `days: null` means everything. */
 export const RANGES = [
@@ -101,43 +107,277 @@ export function exercisesWithHistory() {
 }
 
 /**
- * Strength progress for one exercise: estimated 1RM and top-set load.
+ * Strength progress for one exercise: estimated 1RM, working load and top set.
  *
- * Both are in kilograms, so they share one axis honestly. Estimated 1RM is the
- * series that matters — it is the only one that registers progress made by
- * adding reps rather than plates, which is most of what double progression
+ * Three series rather than two, and the middle one is the addition that
+ * matters. **Working load** is the load actually repeated across the sets —
+ * what the next session is built on — while **top set** is the heaviest single
+ * thing lifted that day. They were the same number until a probe was logged
+ * among the working sets, and on the flat dumbbell bench they now differ by
+ * 17 kg. Drawing only the top set is what made a one-off 72 kg set look like
+ * the new normal.
+ *
+ * All three are in kilograms, so they share one axis honestly. Estimated 1RM
+ * remains the series to read: it is the only one that registers progress made
+ * by adding reps rather than plates, which is most of what double progression
  * produces between load increases.
+ *
+ * `breaks` carries the sessions where the load scale changed. The chart draws
+ * those as gaps rather than as a line, because a continuous line across a
+ * machine change is a picture of a strength gain that did not happen.
  */
 export function strengthSeries(exerciseId, days = 365, endKey = today()) {
   const exercise = programService.getExercise(exerciseId);
-  const history = sessionService.getExerciseHistory(exerciseId, Infinity);
+  const insight = getInsight(exerciseId);
 
-  const e1rm = [];
-  const topSet = [];
-
-  // History is newest-first; charts read oldest-first.
-  for (const performance of [...history].reverse()) {
-    let best1rm = 0;
-    let bestLoad = 0;
-
-    for (const set of performance.sets) {
-      const load = set.weightKg ?? 0;
-      const reps = set.reps ?? 0;
-      if (!reps) continue;
-      best1rm = Math.max(best1rm, estimate1rm(load, reps));
-      bestLoad = Math.max(bestLoad, load);
-    }
-
-    if (best1rm > 0) e1rm.push({ date: performance.date, value: round1(best1rm) });
-    if (bestLoad > 0) topSet.push({ date: performance.date, value: bestLoad });
+  if (!insight) {
+    return {
+      exercise, insight: null,
+      e1rm: [], workingLoad: [], workingLoadPrior: [], topSet: [],
+      breaks: [], stats: null,
+    };
   }
+
+  const pick = (field) => withinDays(
+    insight.series
+      .filter((point) => point[field] !== null && point[field] > 0)
+      .map((point) => ({ date: point.date, value: round1(point[field]) })),
+    days, endKey
+  );
+
+  const e1rm = pick('e1rmKg');
+
+  // The working load, split at the newest **scale** break so the chart never
+  // draws one continuous line across a change of machine.
+  //
+  // Split on a scale break specifically, not on the start of the trend window.
+  // Those are different boundaries and conflating them put a series labelled
+  // "Before the scale change" on the Bulgarian split squat, which is a dumbbell
+  // movement that has never had one — its trend window merely starts later,
+  // because week one is unclassified. A caveat that is not true is worse than
+  // no caveat.
+  const lastBreak = insight.series.reduce(
+    (found, point, index) =>
+      (point.contextChanged || point.discontinuous ? index : found),
+    -1
+  );
+
+  const loadPoints = (predicate) => withinDays(
+    insight.series
+      .map((point, index) => ({ point, index }))
+      .filter(({ point, index }) => predicate(index) && point.workingLoadKg > 0)
+      .map(({ point }) => ({ date: point.date, value: round1(point.workingLoadKg) })),
+    days, endKey
+  );
 
   return {
     exercise,
-    e1rm: withinDays(e1rm, days, endKey),
-    topSet: withinDays(topSet, days, endKey),
-    stats: summarise(withinDays(e1rm, days, endKey)),
+    insight,
+    e1rm,
+    // Everything on the current scale. With no break that is the whole history,
+    // as one line.
+    workingLoad: loadPoints((index) => index >= lastBreak),
+    // Everything before it: real training, on a scale that no longer applies.
+    // Stops *short* of the break rather than running through it, so the two
+    // runs do not visually join, and the caller draws it as unlinked points —
+    // see `pointsOnly` in components/chart-card.js. Empty when there was no
+    // break at all.
+    workingLoadPrior: lastBreak > 0 ? loadPoints((index) => index < lastBreak) : [],
+    topSet: pick('topLoadKg'),
+    breaks: insight.breaks.map((point) => ({
+      date: point.date,
+      reason: point.contextChanged ? 'context' : 'discontinuity',
+      note: explainBreak(point, { exerciseName: exercise?.name ?? 'this movement' }),
+    })),
+    stats: summarise(e1rm),
   };
+}
+
+/* --- Insights ----------------------------------------------------------
+   The interpretive layer. `engine/insights.js` does the reading; this only
+   feeds it and caches the result for one render pass, because the Progress
+   page asks for the same exercise's insight from four different cards.
+   ====================================================================== */
+
+let insightCache = new Map();
+
+/** Drop the memo. Called on any data change, and at the top of a render. */
+export function resetInsights() {
+  insightCache = new Map();
+}
+
+/** The full reading for one exercise, or null when it has never been logged. */
+export function getInsight(exerciseId) {
+  if (insightCache.has(exerciseId)) return insightCache.get(exerciseId);
+
+  const exercise = programService.getExercise(exerciseId);
+  const insight = exercise
+    ? exerciseInsight(exercise, sessionService.getExerciseHistory(exerciseId, Infinity))
+    : null;
+
+  insightCache.set(exerciseId, insight);
+  return insight;
+}
+
+/**
+ * Every exercise with history, read.
+ *
+ * Includes retired and substitute movements: a lift dropped from the split can
+ * still be the clearest example of what the last month did, and a substitute
+ * that has been performed three times has a trend of its own.
+ */
+export function allInsights() {
+  return [
+    ...programService.getAllExercises(),
+    ...programService.getRetiredExercises(),
+    ...programService.getSubstituteExercises(),
+  ]
+    .map((exercise) => getInsight(exercise.id))
+    .filter(Boolean);
+}
+
+/** Exercises sorted into progressing / holding / needs-attention piles. */
+export function getScorecard() {
+  return scorecard(allInsights());
+}
+
+/** Load versus reps, across the program. */
+export function getDriverMix() {
+  return driverMix(allInsights());
+}
+
+/** Progression rolled up by primary muscle group. */
+export function getMuscleProgress() {
+  return muscleProgress(allInsights());
+}
+
+/** The records worth beating, for one exercise. */
+export function getMeaningfulRecords(exerciseId) {
+  return meaningfulRecords(getInsight(exerciseId));
+}
+
+/** Every meaningful record set in the last `days` days, newest first. */
+export function getRecentMeaningfulRecords(days = 21, endKey = today()) {
+  const cutoff = shiftDays(endKey, -days);
+  const out = [];
+
+  for (const insight of allInsights()) {
+    for (const record of meaningfulRecords(insight)) {
+      if (record.date < cutoff) continue;
+      out.push({ ...record, exerciseId: insight.exerciseId, exerciseName: insight.name });
+    }
+  }
+
+  return out.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+/**
+ * How the wave's weeks compare with each other.
+ *
+ * Volume and sets per wave week, so week 1 of every cycle lands in one bar. The
+ * plan is four loading weeks and a deload; this is the chart that shows whether
+ * that is what is happening.
+ */
+export function waveWeekProgress() {
+  const sessions = sessionService.getCompletedSessions();
+
+  const volume = byWaveWeek(sessions, (group) =>
+    round1(group.reduce((sum, session) => sum + sessionService.getSessionVolume(session), 0)
+      / group.length));
+
+  const sets = byWaveWeek(sessions, (group) =>
+    Math.round(group.reduce((sum, session) =>
+      sum + sessionService.getSessionCompletion(session).done, 0) / group.length));
+
+  return { volume, sets };
+}
+
+/** What happened in the session after each deload. Empty until one has. */
+export function getDeloadResponse() {
+  return deloadResponse(allInsights());
+}
+
+/** Where the app's prescriptions and the actual sessions disagree. */
+export function getAdherence() {
+  return adherence(allInsights());
+}
+
+/**
+ * Training consistency, counting a late session as done rather than missed.
+ * The schedule reading comes from session-service, which derives it for old
+ * sessions as well as new ones.
+ */
+export function getConsistency(days = 90, endKey = today()) {
+  return consistency(windowedSessions(days, endKey).map((session) => ({
+    date: session.date,
+    schedule: sessionService.getSchedule(session),
+  })));
+}
+
+/**
+ * The headline reading, in one sentence each.
+ *
+ * Assembled here rather than in the page so the wording lives next to the
+ * numbers it describes, and so it can say "not yet" instead of printing a
+ * confident sentence about two data points.
+ */
+export function headlines(days = 90, endKey = today()) {
+  const insights = allInsights();
+  const board = scorecard(insights);
+  const mix = driverMix(insights);
+  const readable = insights.filter((item) => item.comparableSessions >= 2);
+
+  // Counted by the same judgement the scorecard uses, not by a second rule of
+  // its own. A separate estimated-1RM threshold here reported "14 of 33 up"
+  // above a list of 22 exercises headed "Progressing", and both numbers were
+  // defensible in isolation — which is exactly the problem.
+  const improving = readable.filter((item) => item.status === STATUS.PROGRESSING);
+  const median = readable.length
+    ? medianOf(readable.map((item) => item.e1rm.ratio ?? 1))
+    : null;
+
+  return {
+    // "Am I getting stronger?" — answered by counting lifts, not by averaging
+    // percentages across a squat and a lateral raise.
+    strength: readable.length < 2
+      ? { verdict: 'unknown', text: 'Not enough comparable sessions yet to say. Two per exercise is the minimum.' }
+      : {
+        verdict: improving.length > readable.length / 2 ? 'yes' : (improving.length ? 'mixed' : 'no'),
+        text: `${improving.length} of ${readable.length} readable lifts are up`
+          + `${median !== null ? `, median ${signedPercent(median - 1)}` : ''}.`,
+        improving: improving.length,
+        readable: readable.length,
+        medianRatio: median,
+      },
+    driver: mix.total
+      ? {
+        text: `${mix.counts[DRIVER.REPS]} lifts progressing on reps, ${mix.counts[DRIVER.LOAD]} on load, `
+          + `${mix.counts[DRIVER.BOTH]} on both.`,
+        mix,
+      }
+      : null,
+    attention: board.attention.slice(0, 3),
+    scaleChanged: board.scaleChanged.length,
+    consistency: getConsistency(days, endKey),
+  };
+}
+
+function medianOf(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function signedPercent(ratio) {
+  const percent = Math.round((ratio ?? 0) * 100);
+  return `${percent > 0 ? '+' : ''}${percent}%`;
+}
+
+function shiftDays(key, delta) {
+  const [y, m, d] = key.split('-').map(Number);
+  const date = new Date(y, m - 1, d, 12);
+  date.setDate(date.getDate() + delta);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 /* --- Volume ------------------------------------------------------------- */
@@ -159,6 +399,30 @@ export function volumeByWeek(days = 90, endKey = today()) {
   );
 
   return fillWeeks(weeks);
+}
+
+/**
+ * Working-set volume per week, split by the kind of work that produced it.
+ *
+ * The three figures are never summed into one. A fortnight where warm-up volume
+ * doubled and working volume fell is a meaningfully different fortnight from
+ * one where the total happened to hold, and a single number cannot say which
+ * happened. See `engine/set-model.entryVolume`.
+ */
+export function volumeSplitByWeek(days = 90, endKey = today()) {
+  const sessions = windowedSessions(days, endKey).map((session) => ({
+    date: session.date,
+    split: sessionService.getSessionVolumeBreakdown(session),
+  }));
+
+  const forKind = (kind) => fillWeeks(byWeek(sessions, (group) =>
+    round1(group.reduce((sum, item) => sum + item.split[kind], 0))));
+
+  return {
+    working: forKind('workingKg'),
+    warmup: forKind('warmupKg'),
+    intensity: forKind('intensityKg'),
+  };
 }
 
 /** Sets completed per week. */

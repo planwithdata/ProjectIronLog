@@ -19,8 +19,9 @@ import { recovery, measurements, RECOVERY_FIELDS, MEASUREMENT_FIELDS } from '../
 import * as notesService from '../services/notes-service.js';
 import * as trainingPrefs from '../services/training-prefs-service.js';
 import { describeLoad } from '../engine/loading.js';
+import { describeContext } from '../engine/context.js';
 import {
-  normalizeEntry, workingSets, warmupSets, intensitySequences, isLegacyEntry,
+  normalizeEntry, workingSets, warmupSets, intensitySequences, isLegacyEntry, isTopSet,
 } from '../engine/set-model.js';
 import { formatLoad } from '../core/format.js';
 
@@ -50,7 +51,8 @@ export function toCsv(rows) {
  */
 export function setsCsv() {
   const rows = [[
-    'date', 'day', 'week', 'deload', 'exercise', 'equipment', 'category',
+    'date', 'day', 'week', 'deload', 'schedule_status', 'schedule_offset_days',
+    'planned_exercise', 'performed_exercise', 'equipment', 'category', 'machine',
     'set_kind', 'set', 'drop_sequence', 'drop_stage', 'to_failure',
     'load_entry', 'weight_kg', 'weight_display', 'reps', 'completed', 'rpe',
     'target_weight_kg', 'target_reps', 'est_1rm_kg',
@@ -62,10 +64,16 @@ export function setsCsv() {
   for (const session of [...sessionService.getCompletedSessions()].reverse()) {
     const day = programService.getDayById(session.dayId);
 
+    const schedule = sessionService.getSchedule(session);
+
     for (const raw of session.entries) {
       const exercise = programService.getExercise(raw.exerciseId);
       const entry = normalizeEntry(raw);
       const pain = entry.pain ?? {};
+      const performed = entry.substitution
+        ? programService.getExercise(entry.substitution.performedId)
+        : null;
+      const context = describeContext(entry);
 
       /**
        * One row, whatever kind of set it came from.
@@ -82,9 +90,22 @@ export function setsCsv() {
           day?.label ?? session.dayId,
           session.week,
           session.isDeload ? 'yes' : 'no',
+          // Which day this workout belongs to versus the day it happened on.
+          // Two columns rather than one, so a spreadsheet can group by the
+          // planned day and still see when each session actually landed.
+          schedule?.status ?? '',
+          schedule?.offsetDays ?? '',
           exercise?.name ?? entry.exerciseId,
+          // What was actually performed, when a substitute filled the slot. The
+          // planned movement stays in the column above it, because the two are
+          // different facts and an export that merges them cannot be audited.
+          performed?.name ?? '',
           exercise?.equipment ?? '',
           exercise?.category ?? '',
+          // Which machine the reading came off. Without it a column of cable
+          // loads cannot be filtered into comparable series, which is the whole
+          // reason the field exists.
+          context ?? '',
           kind,
           index === null ? '' : index + 1,
           sequence,
@@ -111,7 +132,14 @@ export function setsCsv() {
       const workingKind = isLegacyEntry(entry) ? 'legacy' : 'working';
 
       warmupSets(entry).forEach((set, index) => row(set, { kind: 'warmup', index }));
-      workingSets(entry).forEach((set, index) => row(set, { kind: workingKind, index }));
+      // A heavier probe is exported as `top`, not `working`. That one column is
+      // what lets a spreadsheet reproduce the load the engine built on: filter
+      // to `working` and the 72 kg bench probe is gone, exactly as it is gone
+      // from `repeatableLoad`.
+      workingSets(entry).forEach((set, index) => row(set, {
+        kind: isTopSet(set) ? 'top' : workingKind,
+        index,
+      }));
       intensitySequences(entry).forEach((sequence, sequenceIndex) => {
         sequence.stages.forEach((stage, stageIndex) => row(stage, {
           kind: sequence.type === 'drop' ? 'drop' : 'failure',
@@ -137,10 +165,11 @@ export function setsCsv() {
 export function sessionsCsv() {
   const rows = [[
     'date', 'day', 'week', 'deload',
+    'schedule_status', 'schedule_offset_days',
     'working_sets_done', 'working_sets_prescribed', 'completion_percent',
-    'warmup_sets', 'drop_sequences', 'failure_sets', 'unclassified_sets',
+    'top_sets', 'warmup_sets', 'drop_sequences', 'failure_sets', 'unclassified_sets',
     'working_volume_kg', 'warmup_volume_kg', 'intensity_volume_kg',
-    'duration_seconds', 'pain_logs',
+    'duration_seconds', 'pain_logs', 'substitutions',
   ]];
 
   for (const session of [...sessionService.getCompletedSessions()].reverse()) {
@@ -149,14 +178,19 @@ export function sessionsCsv() {
     const counts = sessionService.getSessionSetCounts(session);
     const volume = sessionService.getSessionVolumeBreakdown(session);
 
+    const schedule = sessionService.getSchedule(session);
+
     rows.push([
       session.date,
       day?.label ?? session.dayId,
       session.week,
       session.isDeload ? 'yes' : 'no',
+      schedule?.status ?? '',
+      schedule?.offsetDays ?? '',
       completion.done,
       completion.total,
       completion.percent,
+      counts.topDone,
       counts.warmupDone,
       counts.dropSequences,
       counts.failureSets,
@@ -166,6 +200,7 @@ export function sessionsCsv() {
       round(volume.intensityKg, 1),
       session.durationSeconds ?? '',
       sessionService.getPainLogs(session).length,
+      session.entries.filter((entry) => entry.substitution).length,
     ]);
   }
 

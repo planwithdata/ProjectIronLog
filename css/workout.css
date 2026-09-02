@@ -489,6 +489,17 @@
 .set-chip__reps { color: var(--c-text-2); }
 .set-chip--top .set-chip__reps { color: inherit; opacity: 0.85; }
 
+/* A set logged as a heavier probe. Distinct from --top, which means "hit the
+   top of its rep range": one is a rep achievement, the other is a load that
+   was deliberately kept out of the next session's prescription. Warning ink
+   rather than success ink, because the point is caution, not celebration. */
+.set-chip--probe {
+  background: var(--c-warning-dim);
+  color: var(--c-warning);
+}
+
+.set-chip--probe .set-chip__reps { color: inherit; opacity: 0.85; }
+
 /* --- Set kinds ----------------------------------------------------------
    Warm-up, working and intensity sets are visually distinct because they are
    genuinely different things: only the middle one moves a prescribed weight.
@@ -511,8 +522,12 @@
 .set-row__captions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: var(--s-2);
-  padding: 0 44px 6px 38px;
+  /* Left inset clears the index column, right inset clears the checkmark, so
+     the captions line up under the fields they describe. Reduced on the left
+     now that the row can hold a control as well as text. */
+  padding: 0 44px 6px 30px;
 }
 
 .set-row__caption {
@@ -695,3 +710,132 @@
   }
   .set-row__captions { padding-right: 40px; }
 }
+
+/* --- What the numbers mean ---------------------------------------------
+   The loading-convention line and the tempo line. Both are prose rather than
+   pills: they are sentences, and a sentence squeezed into a pill either wraps
+   badly or gets truncated into nonsense.
+
+   Deliberately quiet. It has to be present on every card — a dumbbell figure
+   with no convention beside it is the one number in this app that cannot be
+   checked by looking at it — and something present that often must not shout.
+   ====================================================================== */
+
+.ex-card__basis {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+  font-size: var(--t-caption);
+  line-height: var(--lh-snug);
+  color: var(--c-text-3);
+}
+
+.ex-card__basis svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  opacity: 0.7;
+}
+
+/* --- Machine and substitution tags -------------------------------------
+   Two chips that answer the same underlying question: are today's numbers on
+   the same scale as last week's? Untagged they read as an invitation; tagged
+   they read as a fact, which is why the set state is a border rather than a
+   fill — a filled chip alongside the accent-filled Target pill would compete
+   with the prescription for attention.
+   ====================================================================== */
+
+.ex-card__context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+
+.tag-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  min-height: 34px;
+  padding: 0 var(--s-3);
+  border: 1px dashed var(--c-hairline);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--c-text-3);
+  font-size: var(--t-caption);
+  font-weight: var(--w-medium);
+  line-height: 1;
+}
+
+.tag-btn svg { opacity: 0.75; }
+
+/* Tagged: a solid border and full-strength ink. The dash going away is the
+   signal that the question has been answered. */
+.tag-btn[aria-current="true"] {
+  border-style: solid;
+  border-color: var(--c-accent);
+  color: var(--c-text);
+  background: var(--c-surface-3);
+}
+
+.tag-btn:active { transform: scale(0.97); }
+
+@media (hover: hover) {
+  .tag-btn:hover { border-color: var(--c-accent); color: var(--c-text); }
+}
+
+/* --- Top-set marker ----------------------------------------------------
+   A heavier probe among the working sets.
+
+   Lives in the caption row under the controls, which is where the horizontal
+   room is: the control row is a six-column grid at the limit of a 390px phone,
+   and a seventh column took the weight field down to four pixels. It also
+   means the control can carry a word instead of only a glyph.
+
+   Never adjacent to the checkmark either way — mis-tapping it would relabel
+   the session's working load, the only thing in this row with consequences
+   past today.
+   ====================================================================== */
+
+.set-row__captions { align-items: center; }
+
+.set-row__top {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: auto;          /* pushed left; the caption stays right */
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--c-text-3);
+  font-size: var(--t-micro);
+  font-weight: var(--w-medium);
+  line-height: 1;
+  opacity: 0.75;
+}
+
+.set-row__top--on {
+  border-color: var(--c-warning);
+  background: var(--c-warning-dim);
+  color: var(--c-warning);
+  opacity: 1;
+  font-weight: var(--w-semibold);
+}
+
+.set-row__top:active { transform: scale(0.96); }
+
+@media (hover: hover) {
+  .set-row__top:hover { opacity: 1; color: var(--c-text-2); }
+  .set-row__top--on:hover { color: var(--c-warning); }
+}
+
+/* The whole row carries a warning-tinted left edge when marked, so a probe is
+   identifiable while scrolling past rather than only on inspection. */
+.set-row--top {
+  border-inline-start: 2px solid var(--c-warning);
+  padding-inline-start: var(--s-2);
+  margin-inline-start: calc(var(--s-2) * -1);
+}
+
+.set-row--top .set-row__index { color: var(--c-warning); }

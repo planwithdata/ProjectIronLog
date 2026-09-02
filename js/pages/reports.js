@@ -11,14 +11,14 @@ import { el, icon } from '../core/dom.js';
 import { go } from '../core/router.js';
 import { toast } from '../core/events.js';
 import { download, stampedName, formatBytes } from '../core/download.js';
-import { formatDate, relativeDay, pluralize, trimNumber } from '../core/format.js';
+import { formatDate, relativeDay, pluralize } from '../core/format.js';
 import * as db from '../services/db.js';
 import * as reviewService from '../services/review-service.js';
 import * as notesService from '../services/notes-service.js';
 import { recovery, measurements, photos } from '../services/logs-service.js';
 import { DATASETS } from '../reports/csv.js';
 import { buildReport, DEFAULT_SECTIONS } from '../reports/pdf-report.js';
-import { sectionHead, stat, emptyState } from '../../components/stat.js';
+import { sectionHead, stat } from '../../components/stat.js';
 import { openSheet, confirmSheet } from '../../components/sheet.js';
 
 /** Review window, in days. 14 is the program's own review interval. */

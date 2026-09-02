@@ -32,7 +32,17 @@ import { emptyState } from './stat.js';
  * @param {string} [options.subtitle]
  * @param {object} [options.headline]      { value, unit, delta, deltaSuffix, invertDelta }
  * @param {'line'|'bar'} [options.type]
- * @param {Array<{label: string, points: Array<{date: string, value: number}>, color?: string, dashed?: boolean, showPoints?: boolean}>} options.series
+ * @param {Array<{label: string, points: Array<{date: string, value: number}>, color?: string, dashed?: boolean, showPoints?: boolean, breakGaps?: boolean, pointsOnly?: boolean}>} options.series
+ *        `breakGaps` stops the line bridging a missing point. Used where a gap
+ *        is the message rather than an absence: a strength line must not run
+ *        continuously across a change of machine, because a continuous line
+ *        there is a picture of a strength gain that did not happen.
+ *
+ *        `pointsOnly` draws the marks and no line at all. That is the correct
+ *        grammar for readings that happened but do not form a trend — cable
+ *        loads from a machine that is no longer being used. A line asserts
+ *        continuity; points assert only occurrence, which is all that can
+ *        honestly be claimed about numbers taken off different scales.
  * @param {number} [options.height]        plot height in px, axis band excluded
  * @param {{min: number, max: number}|'zero'} [options.yBounds]
  * @param {(value: number) => string} [options.formatValue]
@@ -261,12 +271,13 @@ function buildConfig({ type, series, yBounds, formatValue, formatLabel, referenc
       data,
       borderColor: entry.color,
       backgroundColor: entry.color,
-      borderWidth: entry.dashed ? 1.5 : 2,
+      showLine: entry.pointsOnly !== true,
+      borderWidth: entry.pointsOnly ? 0 : (entry.dashed ? 1.5 : 2),
       borderDash: entry.dashed ? [4, 4] : undefined,
-      pointRadius: entry.showPoints ? 2.5 : 0,
+      pointRadius: entry.pointsOnly ? 3.5 : (entry.showPoints ? 2.5 : 0),
       pointHoverRadius: 5,
       pointBackgroundColor: entry.color,
-      spanGaps: true,
+      spanGaps: entry.breakGaps !== true,
       tension: 0.25,
       fill: false,
     };

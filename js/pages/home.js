@@ -22,9 +22,11 @@ import * as notesService from '../services/notes-service.js';
 import * as prService from '../services/pr-service.js';
 import * as settingsService from '../services/settings-service.js';
 import * as reminderService from '../services/reminder-service.js';
+import * as trainingPrefs from '../services/training-prefs-service.js';
 import { percentRing } from '../../components/ring.js';
 import { stat, sectionHead, emptyState } from '../../components/stat.js';
 import { openWeightSheet } from '../../components/weight-entry.js';
+import { openChoiceSheet } from '../../components/sheet.js';
 
 export function render() {
   const dayKey = today();
@@ -143,7 +145,11 @@ function heroCard({ day, wave, active, dayKey }) {
           icon(resuming ? 'play' : 'play', { className: 'btn__icon', filled: true }),
           el('span', { text: resuming ? 'Resume Workout' : 'Start Workout' }),
         ]),
-      ])
+      ]),
+      // Second, quieter action. The split is rolling by the program's own
+      // rules, so training a different day today is a normal thing to do —
+      // not an override buried in a settings screen.
+      active ? null : chooseAnotherButton(dayKey, day)
     );
 
     if (resuming) {
@@ -165,13 +171,22 @@ function heroCard({ day, wave, active, dayKey }) {
           : 'Rest day. Nothing scheduled.',
         style: { marginTop: 'var(--s-2)' },
       }),
-      el('div', { style: { marginTop: 'var(--s-5)' } }, [
+      el('div.stack', { style: { marginTop: 'var(--s-5)', gap: 'var(--s-2)' } }, [
+        // On a rest day this is the primary action, not a secondary one: the
+        // reason to open the app on a Monday is usually to catch up a session.
+        active ? null : el('button.btn.btn--primary.btn--block', {
+          type: 'button',
+          on: { click: () => openDayPicker(dayKey) },
+        }, [
+          icon('dumbbell', { className: 'btn__icon' }),
+          el('span', { text: 'Do a workout anyway' }),
+        ]),
         el('button.btn.btn--tinted.btn--block', {
           type: 'button',
           text: 'Browse the week',
           on: { click: () => go('workout') },
         }),
-      ])
+      ].filter(Boolean))
     );
   }
 
@@ -189,6 +204,78 @@ function heroCard({ day, wave, active, dayKey }) {
   }
 
   return el('section.hero', {}, children);
+}
+
+/**
+ * The quiet "something else today" button, with the catch-up it would most
+ * likely be used for named on it.
+ *
+ * Naming the day matters. "Do a different workout" is a menu; "Tuesday Chest
+ * is 1 day behind" is the answer to the question the user actually opened the
+ * app with, and it turns a two-tap browse into one tap.
+ */
+function chooseAnotherButton(dayKey, todayDay) {
+  if (!trainingPrefs.anyDayWorkoutEnabled()) return null;
+
+  const behind = sessionService
+    .getStartableDays(dayKey)
+    .filter((option) => option.overdueThisWeek && option.day.id !== todayDay?.id);
+
+  return el('button.btn.btn--ghost.btn--block', {
+    type: 'button',
+    style: { marginTop: 'var(--s-2)' },
+    on: { click: () => openDayPicker(dayKey) },
+  }, [
+    icon('calendar', { className: 'btn__icon' }),
+    el('span', {
+      text: behind.length
+        ? `${behind[0].day.label} is ${behind[0].fit.label.toLowerCase()} — do it today?`
+        : 'Do a different day\'s workout',
+    }),
+  ]);
+}
+
+/**
+ * Choose which of the program's workouts to do today.
+ *
+ * Every training day is listed, in the order they are most likely to be wanted
+ * — today's first, then yesterday's and the day before, then the rest of the
+ * week. Nothing is hidden and nothing is disabled: the whole point is that the
+ * app stops deciding which sessions are still available.
+ *
+ * Each row says when that workout was last done and how starting it today would
+ * sit against the schedule, because those two facts are what the decision turns
+ * on. The session then records both, so the split stays legible afterwards —
+ * see `session-service.startSession`.
+ */
+async function openDayPicker(dayKey) {
+  const options = sessionService.getStartableDays(dayKey);
+  const todayLabel = programService.getTodayDay(dayKey)?.label ?? null;
+
+  const chosen = await openChoiceSheet({
+    title: 'Which workout today?',
+    text: todayLabel
+      ? `Today is ${todayLabel} on the plan. Anything here can be trained instead — the app `
+        + 'records which day it was scheduled for and which day you actually did it.'
+      : 'Anything here can be trained today. The app records which day it was scheduled for and '
+        + 'which day you actually did it.',
+    choices: options.map((option) => ({
+      value: option.day.id,
+      label: option.day.label,
+      // "On its day" / "1 day late" — the schedule consequence, stated before
+      // the choice is made rather than discovered afterwards.
+      sub: [
+        option.fit.label,
+        option.lastDate ? `last done ${relativeDay(option.lastDate)}` : 'never done',
+        option.doneThisWeek ? 'already done this week' : null,
+        pluralize(option.exercises, 'exercise'),
+      ].filter(Boolean).join(' · '),
+      tone: option.overdueThisWeek ? 'accent' : null,
+      selected: option.day.id === programService.getTodayDay(dayKey)?.id,
+    })),
+  });
+
+  if (chosen) go('workout', { day: chosen });
 }
 
 function metaItem(iconName, label) {
@@ -267,16 +354,48 @@ function weekCard(dayKey) {
               : 'Complete your first session to start tracking.',
             style: { marginTop: '2px' },
           }),
-          streak > 0
-            ? el('div', { style: { marginTop: 'var(--s-2)' } }, [
-                el('span.pill.pill--success', {}, [
+          el('div.row', { style: { marginTop: 'var(--s-2)', gap: 'var(--s-1)', flexWrap: 'wrap' } }, [
+            streak > 0
+              ? el('span.pill.pill--success', {}, [
                   icon('flame', { size: 13 }),
                   el('span', { text: `${pluralize(streak, 'week')} streak` }),
-                ]),
-              ])
-            : null,
+                ])
+              : null,
+            // Sessions trained on another day are reported, never penalised.
+            // The program's missed-day rules call the split rolling, so a
+            // Tuesday workout done on Wednesday is done.
+            week.offSchedule
+              ? el('span.pill', {
+                  text: `${week.offSchedule} moved`,
+                  title: 'Completed on a different day from the one scheduled. Counted as done.',
+                })
+              : null,
+          ].filter(Boolean)),
         ]),
       ]),
+
+      // What is still outstanding this week, and one tap to go and do it.
+      week.outstanding?.length
+        ? el('div', { style: { marginTop: 'var(--s-3)' } }, [
+            el('div.t-caption.t-dim', { text: 'Still to do this week' }),
+            el('div.row', { style: { gap: 'var(--s-2)', flexWrap: 'wrap', marginTop: 'var(--s-2)' } },
+              // `.day-chip`, not `.pill`: these are real actions that start a
+              // workout, so they need a real touch target. A pill is 24px tall,
+              // which the accessibility audit rightly fails at the 44px floor.
+              week.outstanding.map(({ day, fit }) =>
+                el('button.day-chip', {
+                  type: 'button',
+                  title: `${day.label} — ${fit.label}. Tap to open it.`,
+                  on: { click: () => go('workout', { day: day.id }) },
+                }, [
+                  el('span.day-chip__label', { text: day.label }),
+                  fit.offsetDays > 0
+                    ? el('span.day-chip__meta', { text: fit.label.toLowerCase() })
+                    : null,
+                ].filter(Boolean))
+              )),
+          ])
+        : null,
     ]),
   ]);
 }

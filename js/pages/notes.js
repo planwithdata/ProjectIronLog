@@ -10,7 +10,7 @@
 import { el, icon } from '../core/dom.js';
 import { go, refresh } from '../core/router.js';
 import { toast } from '../core/events.js';
-import { relativeDay, formatDate, today, pluralize } from '../core/format.js';
+import { relativeDay, formatDate, today } from '../core/format.js';
 import * as notesService from '../services/notes-service.js';
 import { NOTE_CATEGORIES } from '../services/notes-service.js';
 import * as programService from '../services/program-service.js';

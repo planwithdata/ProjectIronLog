@@ -33,18 +33,27 @@ import * as prService from '../services/pr-service.js';
 import * as restTimer from '../services/rest-timer.js';
 import {
   actionLabel, repRange, incrementFor, earnedAdvance,
-  difficultyLadder, difficultyRung,
+  difficultyLadder, difficultyRung, repeatableLoad,
 } from '../engine/progression.js';
-import { describeLoad } from '../engine/loading.js';
+import { describeLoad, loadBasisLabel } from '../engine/loading.js';
+import { describeContext } from '../engine/context.js';
 import {
-  normalizeEntry, workingSets, warmupSets, intensitySequences,
-  isLegacyEntry, isPainLimited, describeComposition, PAIN_ACTION, PAIN_ACTION_LABELS,
+  normalizeEntry,
+  workingSets,
+  warmupSets,
+  intensitySequences,
+  topSets,
+  isLegacyEntry,
+  isTopSet,
+  describeComposition,
+  PAIN_ACTION,
+  PAIN_ACTION_LABELS,
 } from '../engine/set-model.js';
 import { setRow } from '../../components/set-row.js';
 import { intensityBlock, intensityActions } from '../../components/intensity-block.js';
 import { exerciseArt } from '../../components/exercise-art.js';
 import { mountRestBar } from '../../components/rest-bar.js';
-import { openSheet, confirmSheet, sheetRow } from '../../components/sheet.js';
+import { openSheet, confirmSheet, sheetRow, openChoiceSheet } from '../../components/sheet.js';
 import { sectionHead, emptyState } from '../../components/stat.js';
 
 /** Teardown for the rest bar, held so mount() can return it to the router. */
@@ -184,6 +193,19 @@ function dayHeader(day, wave, session) {
     if (wave.isDeload) pills.push(el('span.pill.pill--warning', { text: 'Deload' }));
   }
 
+  // How training this workout today sits against the schedule. Stated on the
+  // header rather than buried, because the whole feature is that the answer is
+  // allowed to be "one day late" and nothing bad happens.
+  const fit = session
+    ? sessionService.getSchedule(session)
+    : programService.getScheduleFit(day.id, today());
+  if (day.type === 'training' && fit && fit.offsetDays !== 0) {
+    pills.push(el('span.pill.pill--accent', {
+      text: fit.label,
+      title: `Scheduled for ${day.day}. Recorded as performed today, and counted as done.`,
+    }));
+  }
+
   return el('section', {}, [
     el('div.row.row--between', { style: { alignItems: 'flex-start' } }, [
       el('div', { style: { minWidth: 0 } }, [
@@ -255,6 +277,9 @@ function browseCard(exercise, day, wave) {
         : null,
     ]),
 
+    loadBasisNote(exercise),
+    tempoNote(exercise),
+
     el('div.ex-card__plan', {}, [
       el('span.t-semibold', { text: `${actionLabel(plan.action)} · ` }),
       el('span', { text: plan.reason }),
@@ -302,10 +327,14 @@ function loggingCard(exercise, session, wave) {
     if (descriptor.entry === 'machine') return null;   // nothing to derive
     const primary = formatLoad(descriptor, units);
     const secondary = formatLoadSecondary(descriptor, units);
+    // Both figures for a dumbbell pair, always: "36 kg / hand · 72 kg total".
+    // A single dumbbell number is the one value in this app that cannot be
+    // checked by looking at it, and the brief's third point is exactly that.
     return secondary ? `${primary} · ${secondary}` : primary;
   };
 
   const card = el('article.card', { dataset: { exerciseId: exercise.id } });
+  const contextHost = el('div');
   const warmupHost = el('div.set-group.set-group--warmup');
   const setsHost = el('div.ex-card__sets');
   const footHost = el('div.ex-card__foot');
@@ -323,6 +352,7 @@ function loggingCard(exercise, session, wave) {
     const allDone = working.length > 0 && working.every((set) => set.completed);
     card.classList.toggle('ex-card--done', allDone);
 
+    paintContext(contextHost, { exercise, entry: live, session, paintCard, warmupOnly });
     paintWarmup(warmupHost, { exercise, entry: live, session, units, increment, captionFor, paintCard, warmupOnly });
     paintWorking(setsHost, { exercise, entry: live, session, units, increment, range, captionFor, paintCard, warmupOnly });
     paintFoot(footHost, { exercise, entry: live, session, units, increment, allDone, paintCard, warmupOnly });
@@ -346,6 +376,8 @@ function loggingCard(exercise, session, wave) {
           )
         : null,
     ]),
+    warmupOnly ? null : loadBasisNote(exercise),
+    warmupOnly ? null : tempoNote(exercise),
     warmupOnly ? warmupOnlyBlurb(exercise) : null,
     entry.planReason && !warmupOnly
       ? el('div.ex-card__plan', {}, [
@@ -356,6 +388,7 @@ function loggingCard(exercise, session, wave) {
     // Last session vs today, side by side — the comparison the brief asked for.
     warmupOnly ? null : planCompare({ exercise, entry, last, units, loadPrefs, range, wave }),
     difficultyPicker({ exercise, entry, session }),
+    contextHost,
     warmupHost,
     setsHost,
     footHost,
@@ -366,6 +399,309 @@ function loggingCard(exercise, session, wave) {
 
   paintCard();
   return card;
+}
+
+/* --- What the numbers mean --------------------------------------------- */
+
+/**
+ * One line stating the loading convention, on every card that has one.
+ *
+ * The brief's third point is that a dumbbell figure is misleading unless it
+ * says which figure it is. The answer is not a cleverer number — it is a label
+ * that is always there, so "55" is never read as one dumbbell and "36 kg /
+ * hand" is never read as the pair. The same line does the same job for plates
+ * (the bar is excluded) and for a cable stack (this machine only).
+ */
+function loadBasisNote(exercise) {
+  if (programService.isWarmupOnly(exercise)) return null;
+  const label = loadBasisLabel(exercise, trainingPrefs.getLoadPrefs());
+  if (!label) return null;
+
+  return el('p.ex-card__basis', {}, [
+    icon('info', { size: 13 }),
+    el('span', { text: label }),
+  ]);
+}
+
+/** Tempo guidance, where the program gives any. Only the Pallof press, today. */
+function tempoNote(exercise) {
+  const tempo = programService.getTempo(exercise);
+  if (!tempo?.label) return null;
+
+  return el('p.ex-card__basis', {}, [
+    icon('timer', { size: 13 }),
+    el('span', { text: tempo.label }),
+  ]);
+}
+
+/* --- Which machine, and which movement --------------------------------
+   Two controls that answer the same underlying question: are today's numbers
+   on the same scale as last week's? A machine tag and a substitution both
+   change the answer, and both are one tap.
+   ====================================================================== */
+
+function paintContext(host, { exercise, entry, session, paintCard, warmupOnly }) {
+  const wantsMachine = !warmupOnly
+    && programService.supportsLoadContext(exercise)
+    && trainingPrefs.machineContextEnabled();
+  const substitutions = warmupOnly ? [] : programService.getSubstitutions(exercise);
+
+  if (!wantsMachine && !substitutions.length) {
+    replace(host, []);
+    return;
+  }
+
+  const contextLabel = describeContext(entry);
+  const substitution = entry.substitution ?? null;
+
+  replace(host, [
+    el('div.ex-card__context', {}, [
+      wantsMachine
+        ? el('button.tag-btn', {
+            type: 'button',
+            'aria-current': contextLabel ? 'true' : null,
+            title: contextLabel
+              ? 'Change or clear the machine tag'
+              : 'Tag which machine this is, so the history compares like with like',
+            on: { click: () => openContextSheet(session.id, exercise, entry, paintCard) },
+          }, [
+            icon('dumbbell', { size: 13 }),
+            el('span', { text: contextLabel ?? 'Tag machine' }),
+          ])
+        : null,
+
+      substitutions.length
+        ? el('button.tag-btn', {
+            type: 'button',
+            'aria-current': substitution ? 'true' : null,
+            title: substitution
+              ? 'Change or clear the substitution'
+              : 'Log a different movement in this slot without it counting as skipped',
+            on: { click: () => openSubstitutionSheet(session.id, exercise, entry, paintCard) },
+          }, [
+            icon('swap', { size: 13 }),
+            el('span', { text: substitution ? substitution.label : 'Substitute' }),
+          ])
+        : null,
+    ].filter(Boolean)),
+
+    // A substitution changes what the card is *about*, so it says so in a
+    // sentence rather than only in a tag. The slot still counts as completed —
+    // that is the whole point — and the load keeps its own history because two
+    // attachments on one stack are two scales.
+    substitution
+      ? el('p.ex-card__basis', {}, [
+          icon('info', { size: 13 }),
+          el('span', {
+            text: `Performing ${substitution.label} in place of ${exercise.name}. `
+              + 'This counts as the exercise done, not skipped'
+              + (substitution.comparableLoad
+                ? '.'
+                : ', and its loads progress on their own since the two readings are not '
+                  + 'comparable.'),
+          }),
+        ])
+      : null,
+  ].filter(Boolean));
+}
+
+/**
+ * Pick which machine this is.
+ *
+ * The options are the machines this exercise has actually been logged against,
+ * because in one gym that list *is* the list of machines. A free-text row
+ * covers the first time and anything new. Nothing is ever inferred: an untagged
+ * entry stays untagged, and the engine handles it by flagging rather than
+ * guessing.
+ */
+async function openContextSheet(sessionId, exercise, entry, paintCard) {
+  const known = sessionService.getKnownContexts(exercise.id);
+  const attachments = programService.getAttachments(exercise);
+  const current = entry.context ?? null;
+  const currentKey = current ? `${current.machineId ?? ''}|${current.attachment ?? ''}` : null;
+
+  const choices = [
+    ...known.map((context) => ({
+      value: { kind: 'known', context },
+      label: [context.label || context.machineId, context.attachment].filter(Boolean).join(' · '),
+      sub: `last used ${relativeDay(context.lastUsed)}`,
+      selected: `${context.machineId ?? ''}|${context.attachment ?? ''}` === currentKey,
+      iconName: 'dumbbell',
+    })),
+    { value: { kind: 'new' }, label: 'A different machine…', sub: 'Name it, and its loads get their own history', iconName: 'plus' },
+    ...(current ? [{ value: { kind: 'clear' }, label: 'Remove the tag', sub: 'Back to an untagged reading', iconName: 'close' }] : []),
+  ];
+
+  const picked = await openChoiceSheet({
+    title: 'Which machine?',
+    text: 'Cable and machine readings are not comparable between machines — 4.5 on one stack can '
+      + 'be 10 on the next. Tagging it lets the app compare this week with the right week.',
+    choices,
+  });
+
+  if (!picked) return;
+
+  try {
+    if (picked.kind === 'clear') {
+      await sessionService.clearEntryContext(sessionId, exercise.id);
+    } else if (picked.kind === 'known') {
+      await sessionService.setEntryContext(sessionId, exercise.id, picked.context);
+    } else {
+      const named = await promptForMachine(attachments, current);
+      if (!named) return;
+      await sessionService.setEntryContext(sessionId, exercise.id, named);
+    }
+    paintCard();
+    // The prescription is frozen at the start of a session by design, so
+    // changing the machine offers the re-read rather than performing it: a
+    // target that moves under the user between sets is worse than a stale one.
+    await offerReanchor(sessionId, exercise, paintCard);
+  } catch (error) {
+    toast(error.message || 'Could not save that', 'danger');
+  }
+}
+
+/** Name a machine, and pick its attachment where the movement has a choice. */
+async function promptForMachine(attachments, current) {
+  const labelInput = el('input.input', {
+    type: 'text',
+    value: current?.label ?? '',
+    placeholder: 'e.g. Corner stack, Machine 2, Blue frame',
+    'aria-label': 'Machine name',
+    maxlength: '60',
+  });
+
+  const attachmentSelect = attachments.length
+    ? el('select.input', { 'aria-label': 'Attachment' }, [
+        el('option', { value: '', text: 'No attachment', selected: !current?.attachment }),
+        ...attachments.map((item) => el('option', {
+          value: item, text: item, selected: item === current?.attachment,
+        })),
+      ])
+    : null;
+
+  const choice = await openSheet({
+    title: 'Name this machine',
+    text: 'Any name that means something to you. It is only ever compared with itself.',
+    body: el('div.stack', { style: { gap: 'var(--s-3)' } }, [
+      el('div', {}, [el('span.field__label', { text: 'Machine' }), labelInput]),
+      attachmentSelect
+        ? el('div', {}, [
+            el('span.field__label', { text: 'Attachment' }),
+            attachmentSelect,
+            el('span.t-caption.t-faint', {
+              text: 'A rope and a straight bar on one stack are two different scales.',
+            }),
+          ])
+        : null,
+    ].filter(Boolean)),
+    actions: [
+      { label: 'Save', value: 'save', tone: 'primary' },
+      { label: 'Cancel', value: false, tone: 'plain' },
+    ],
+  });
+
+  if (choice !== 'save') return null;
+  const label = labelInput.value.trim();
+  const attachment = attachmentSelect?.value ?? '';
+  if (!label && !attachment) return null;
+  return { label, machineId: label, attachment };
+}
+
+/**
+ * Offer to re-read the target now that the machine is known.
+ *
+ * Offered, not applied. The session's prescription is deliberately frozen at
+ * start, and rewriting it under the user's thumb — possibly after they have
+ * already logged two sets — would be worse than leaving a stale figure on a
+ * card that now carries the correct machine tag.
+ */
+async function offerReanchor(sessionId, exercise, paintCard) {
+  const session = sessionService.getSessionById(sessionId);
+  const entry = session?.entries.find((item) => item.exerciseId === exercise.id);
+  if (!entry) return;
+
+  const plan = sessionService.getRecommendation(exercise, today(), { context: entry.context });
+  const current = entry.targetWeightKg ?? null;
+  if (plan.weightKg === null || plan.weightKg === current) return;
+
+  // Do not offer to overwrite a target the user has already trained against.
+  if (workingSets(normalizeEntry(entry)).some((set) => set.completed)) return;
+
+  const accepted = await confirmSheet({
+    title: 'Update today\'s target?',
+    text: `With this machine, the history reads ${trimNumber(plan.weightKg, 2)} kg rather than `
+      + `${current === null ? 'nothing' : `${trimNumber(current, 2)} kg`}. ${plan.reason}`,
+    confirmLabel: 'Use the new target',
+    cancelLabel: 'Keep what is on the card',
+  });
+  if (!accepted) return;
+
+  try {
+    await sessionService.updateEntry(sessionId, exercise.id, {
+      targetWeightKg: plan.weightKg,
+      targetReps: plan.perSetReps,
+      plannedAction: plan.action,
+      planReason: plan.reason,
+    });
+    // The set rows carry the target as their pre-filled load, so they are
+    // re-seeded too — but only the ones not yet logged.
+    const live = sessionService.getSessionById(sessionId)
+      ?.entries.find((item) => item.exerciseId === exercise.id);
+    for (const [index, set] of (live?.sets ?? []).entries()) {
+      if (set.completed) continue;
+      await sessionService.updateSet(sessionId, exercise.id, index, {
+        weightKg: plan.perSetWeights ? plan.perSetWeights[index] ?? plan.weightKg : plan.weightKg,
+        reps: plan.perSetReps[index] ?? set.reps,
+      });
+    }
+    refresh();
+  } catch (error) {
+    toast(error.message || 'Could not update the target', 'danger');
+  }
+}
+
+/** Log a listed substitute in this slot. */
+async function openSubstitutionSheet(sessionId, exercise, entry, paintCard) {
+  const options = programService.getSubstitutions(exercise);
+  const current = entry.substitution?.performedId ?? null;
+
+  const choices = [
+    {
+      value: { kind: 'clear' },
+      label: exercise.name,
+      sub: 'As programmed',
+      selected: !current,
+      iconName: 'check',
+    },
+    ...options.map((option) => ({
+      value: { kind: 'use', id: option.id },
+      label: option.label,
+      sub: option.note
+        ?? (option.comparableLoad
+          ? 'Loads are comparable'
+          : 'Keeps its own load history'),
+      selected: option.id === current,
+      iconName: 'swap',
+    })),
+  ];
+
+  const picked = await openChoiceSheet({
+    title: 'What are you actually doing?',
+    text: 'A substitute counts as the exercise done, not skipped. Its loads keep their own '
+      + 'history where the two readings are not comparable.',
+    choices,
+  });
+
+  if (!picked) return;
+
+  try {
+    if (picked.kind === 'clear') await sessionService.clearSubstitution(sessionId, exercise.id);
+    else await sessionService.substituteEntry(sessionId, exercise.id, picked.id);
+    paintCard();
+  } catch (error) {
+    toast(error.message || 'Could not save that', 'danger');
+  }
 }
 
 /* --- Warm-up / ramp section -------------------------------------------- */
@@ -454,11 +790,14 @@ function paintWorking(host, { exercise, entry, session, units, increment, range,
   const sets = workingSets(entry);
   const done = sets.filter((set) => set.completed).length;
   const legacy = isLegacyEntry(entry);
+  const repeatable = repeatableLoad(entry);
+  const tops = topSets(entry).length;
+  const maintained = programService.isMaintained(exercise);
 
   replace(host, [
     setGroupHead(
       legacy ? 'Logged sets (unclassified)' : 'Working sets',
-      `${done}/${sets.length}`,
+      tops ? `${done}/${sets.length} · ${tops} top` : `${done}/${sets.length}`,
       'working'
     ),
     ...sets.map((set, index) => setRow({
@@ -470,13 +809,38 @@ function paintWorking(host, { exercise, entry, session, units, increment, range,
       showRpe: true,
       perSide: Boolean(exercise.reps.perSide),
       captionFor,
+      variant: isTopSet(set) ? 'top' : 'working',
+      indexLabel: isTopSet(set) ? `T${index + 1}` : null,
+      // A heavier set marked as a probe. Offered on every working set, because
+      // which one it was is not knowable in advance — and it never appears on a
+      // maintained movement, where there is no working load to probe past.
+      onToggleTop: maintained || legacy
+        ? null
+        : () => handleToggleTop(session.id, exercise.id, index, !isTopSet(set), paintCard),
+      isTop: isTopSet(set),
       onChange: (patch) => handleSetChange(session.id, exercise, index, patch, paintCard),
       // Only sets beyond the prescription can be removed, and only then.
       onRemove: index >= exercise.sets
         ? () => handleRemoveSet(session.id, exercise.id, index, paintCard)
         : null,
     })),
-  ]);
+
+    // Says what the marking actually did. Without this the toggle is a mystery
+    // badge; with it, the reason the next session will read 55 and not 72 is on
+    // the screen where the decision was made.
+    tops
+      ? el('p.ex-card__basis', {}, [
+          icon('info', { size: 13 }),
+          el('span', {
+            text: `${tops === 1 ? 'One set is' : `${tops} sets are`} marked as a heavier top set. `
+              + `Still logged, still counted in volume, and still eligible for a heaviest-set `
+              + `record — but next session is built on `
+              + `${repeatable === null ? 'the repeatable sets' : `${trimNumber(displayWeight(repeatable, units), 2)} ${units}`}, `
+              + 'the load you actually repeated.',
+          }),
+        ])
+      : null,
+  ].filter(Boolean));
 }
 
 function paintFoot(host, { exercise, entry, session, units, increment, allDone, paintCard, warmupOnly }) {
@@ -819,8 +1183,19 @@ function planCompare({ exercise, entry, last, units, loadPrefs, range, wave }) {
   const target = entry.targetWeightKg;
   const setCount = entry.targetReps?.length ?? exercise.sets;
 
-  const lastDescriptor = last && last.sets.length
-    ? describeLoad(exercise, Math.max(...last.sets.map((set) => set.weightKg ?? 0)) || null, loadPrefs)
+  // The load actually *repeated* last time, which is what today is built on.
+  // The heaviest set is shown beside it only when the two differ — which is
+  // precisely the session where reading the heaviest one was the bug.
+  const lastRepeatable = last && last.sets.length ? repeatableLoad(last) : null;
+  const lastTop = last && last.sets.length
+    ? Math.max(...last.sets.map((set) => set.weightKg ?? 0)) || null
+    : null;
+
+  const lastDescriptor = lastRepeatable === null
+    ? null
+    : describeLoad(exercise, lastRepeatable, loadPrefs);
+  const topDescriptor = lastTop !== null && lastTop !== lastRepeatable
+    ? describeLoad(exercise, lastTop, loadPrefs)
     : null;
   const todayDescriptor = target === null || target === undefined
     ? null
@@ -828,7 +1203,9 @@ function planCompare({ exercise, entry, last, units, loadPrefs, range, wave }) {
 
   return el('div.plan-compare', {}, [
     el('div.plan-compare__col', {}, [
-      el('div.plan-compare__label', { text: 'Last session' }),
+      el('div.plan-compare__label', {
+        text: topDescriptor ? 'Last working load' : 'Last session',
+      }),
       el('div.plan-compare__value', {
         text: last && last.sets.length
           ? (lastDescriptor?.displayKg ? formatLoad(lastDescriptor, units) : 'Bodyweight')
@@ -839,10 +1216,21 @@ function planCompare({ exercise, entry, last, units, loadPrefs, range, wave }) {
           ? last.sets.map((set) => set.reps ?? 0).join(' / ')
           : 'No history yet',
       }),
+      // "top set 72 kg" — kept visible so a probe is never lost, and never
+      // mistaken for the working load again.
+      topDescriptor
+        ? el('div.t-micro', {
+            text: `top set ${formatLoad(topDescriptor, units)}`,
+            style: { marginTop: '2px', color: 'var(--c-warning, var(--c-text-3))' },
+          })
+        : null,
       last
         ? el('div.t-micro.t-faint', {
             text: [
               relativeDay(last.date),
+              last.contextLabel ? `on ${last.contextLabel}` : null,
+              last.substituted && last.substitution
+                ? `as ${last.substitution.label}` : null,
               last.painLimited ? 'pain-limited' : null,
               last.legacy ? 'unclassified' : null,
               last.warmupSets?.length ? `${last.warmupSets.length} warm-up` : null,
@@ -853,7 +1241,17 @@ function planCompare({ exercise, entry, last, units, loadPrefs, range, wave }) {
             style: { marginTop: '2px' },
           })
         : null,
-    ]),
+      // What the app asked for last time, next to what was done. Both are kept
+      // and neither overwrites the other — the brief's eighth point.
+      last && last.targetWeightKg !== null && last.targetWeightKg !== undefined
+        && lastRepeatable !== null
+        && Math.abs(last.targetWeightKg - lastRepeatable) > 0.01
+        ? el('div.t-micro.t-faint', {
+            text: `planned ${formatLoad(describeLoad(exercise, last.targetWeightKg, loadPrefs), units)}`,
+            style: { marginTop: '2px' },
+          })
+        : null,
+    ].filter(Boolean)),
     el('div.plan-compare__col', {}, [
       el('div.plan-compare__label', { text: wave.isDeload ? 'Today · deload' : 'Today' }),
       el('div.plan-compare__value', {
@@ -923,6 +1321,25 @@ function handleSetChange(sessionId, exercise, setIndex, patch, paintCard) {
       if (!unmountRestBar) unmountRestBar = mountRestBar(document.body);
     }
   }
+}
+
+/**
+ * Mark or unmark a set as a heavier top set.
+ *
+ * The set does not move and its numbers do not change. What changes is whether
+ * the progression engine counts it when deciding the next working load — see
+ * `engine/progression.repeatableLoad`.
+ */
+function handleToggleTop(sessionId, exerciseId, setIndex, isTop, paintCard) {
+  sessionService.setTopSet(sessionId, exerciseId, setIndex, isTop)
+    .then(() => {
+      paintCard();
+      updateFinishPanel(sessionId);
+      toast(isTop
+        ? 'Marked as a top set — it will not set next session\'s working load'
+        : 'Back to a working set');
+    })
+    .catch((error) => toast(error.message || 'Could not save that', 'danger'));
 }
 
 function handleAddSet(sessionId, exerciseId, paintCard) {
@@ -1191,6 +1608,15 @@ async function showSummary(sessionId) {
 
   const body = [
     sheetRow('Working sets', `${summary.completion.done}/${summary.completion.total}`, { iconName: 'check' }),
+    // Which day's workout this was, when that is not the day it happened on.
+    // First in the list, because it is the thing about this session that the
+    // reader is most likely to be surprised by later.
+    summary.schedule && summary.schedule.offsetDays !== 0
+      ? sheetRow('Schedule', `${summary.dayLabel} · ${summary.schedule.label}`, { iconName: 'calendar' })
+      : null,
+    summary.topSetCount
+      ? sheetRow('Heavier top sets', String(summary.topSetCount), { iconName: 'warning' })
+      : null,
     summary.warmupSetCount
       ? sheetRow('Warm-up sets', String(summary.warmupSetCount), { iconName: 'flame' })
       : null,
@@ -1255,15 +1681,63 @@ async function showSummary(sessionId) {
     );
   }
 
+  if (summary.substitutions.length) {
+    body.push(
+      el('p.t-overline', { text: 'Performed as a substitute', style: { marginTop: 'var(--s-4)' } }),
+      ...summary.substitutions.map((item) =>
+        el('div.sheet__row', {}, [
+          icon('swap', { size: 16 }),
+          el('div', { style: { minWidth: 0 } }, [
+            el('div.t-subhead.t-truncate', { text: item.performedName }),
+            el('div.t-caption.t-faint', {
+              text: `in place of ${item.plannedName}`
+                + (item.comparableLoad ? '' : ' · keeps its own load history'),
+            }),
+          ]),
+        ])
+      ),
+      el('p.t-caption.t-faint', {
+        text: 'Counted as the exercise done, not skipped.',
+        style: { marginTop: 'var(--s-2)' },
+      })
+    );
+  }
+
   if (summary.advancing.length) {
     body.push(
       el('p.t-overline', { text: 'Earned a load increase', style: { marginTop: 'var(--s-4)' } }),
       ...summary.advancing.map((item) =>
         el('div.sheet__row', {}, [
           icon('check', { size: 16 }),
-          el('span.t-subhead.t-truncate', { text: item.name }),
+          el('div', { style: { minWidth: 0 } }, [
+            el('div.t-subhead.t-truncate', { text: item.name }),
+            // The load the increase applies *to*, when the session also
+            // contained a heavier probe. Without it "next session" is ambiguous
+            // between the 55 kg that was earned and the 72 kg that was touched.
+            item.topSets
+              ? el('div.t-caption.t-faint', {
+                  text: `from ${trimNumber(displayWeight(item.workingWeightKg, units), 2)} ${units} `
+                    + `— the top set at ${trimNumber(displayWeight(item.topWeightKg, units), 2)} ${units} `
+                    + 'is not the base',
+                })
+              : null,
+          ].filter(Boolean)),
           el('span.spacer'),
           el('span.t-subhead.t-semibold.stat__delta--up', { text: 'next session' }),
+        ])
+      )
+    );
+  }
+
+  if (summary.maintained.length) {
+    body.push(
+      el('p.t-overline', { text: 'Held by design', style: { marginTop: 'var(--s-4)' } }),
+      ...summary.maintained.map((item) =>
+        el('div.sheet__row', {}, [
+          icon('check', { size: 16 }),
+          el('span.t-subhead.t-truncate', { text: item.name }),
+          el('span.spacer'),
+          el('span.t-caption.t-faint', { text: 'not progressed' }),
         ])
       )
     );
@@ -1274,11 +1748,20 @@ async function showSummary(sessionId) {
       el('p.t-overline', { text: pluralize(records.length, 'new record'), style: { marginTop: 'var(--s-4)' } }),
       ...records.slice(0, 6).map((record) =>
         el('div.sheet__row', {}, [
-          icon('trophy', { size: 16 }),
+          icon(record.unverified ? 'warning' : 'trophy', { size: 16 }),
           el('div', { style: { minWidth: 0 } }, [
             el('div.t-subhead.t-truncate', { text: record.exerciseName }),
             el('div.t-caption.t-faint', { text: `${record.label} · ${prService.describeRecord(record)}` }),
-          ]),
+            // A record standing on a load-scale change is reported, because the
+            // set was performed — and labelled, because the number is not
+            // comparable with the one it beat.
+            record.unverified
+              ? el('div.t-caption', {
+                  text: record.caveat ?? '',
+                  style: { color: 'var(--c-warning)' },
+                })
+              : null,
+          ].filter(Boolean)),
         ])
       )
     );

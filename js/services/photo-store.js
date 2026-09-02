@@ -56,6 +56,26 @@ function openDb() {
   return dbPromise;
 }
 
+/**
+ * Run one transaction and resolve with what the request actually returned.
+ *
+ * The unwrapping is fussier than it looks, and it used to be wrong. `work`
+ * returns an `IDBRequest` for every operation here, and its `.result` is the
+ * stored value for `get` and `undefined` for `put`, `delete` and `clear`. An
+ * earlier version resolved `result?.result ?? result`, which meant a **miss on
+ * `get`** — `.result` legitimately `undefined` — fell through the `??` and
+ * resolved with the `IDBRequest` object itself. That is truthy, so `getBlob`
+ * reported a hit and `getObjectUrl` handed an `IDBRequest` to
+ * `URL.createObjectURL`, which threw an unhandled `TypeError`.
+ *
+ * That case is not exotic: it is every photo on a device that has restored a
+ * JSON backup, because a backup carries photo *metadata* and the blobs live
+ * only in this store. Five records restored meant five unhandled rejections
+ * and five broken image slots.
+ *
+ * So the request is unwrapped by type rather than by truthiness, and
+ * `undefined` is allowed to mean `undefined`.
+ */
 function transact(mode, work) {
   return openDb().then((db) => new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, mode);
@@ -67,7 +87,9 @@ function transact(mode, work) {
       reject(error);
       return;
     }
-    tx.oncomplete = () => resolve(result?.result ?? result);
+    tx.oncomplete = () => resolve(
+      result instanceof IDBRequest ? result.result : result
+    );
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error('Photo write aborted — storage may be full.'));
   }));
@@ -78,10 +100,17 @@ export function putBlob(id, blob) {
   return transact('readwrite', (store) => store.put(blob, id));
 }
 
-/** Retrieve a Blob, or null. */
+/**
+ * Retrieve a Blob, or null when this device does not hold it.
+ *
+ * Null is a normal answer, not an error. A photo record restored from a JSON
+ * backup has metadata here and no blob, because blobs are deliberately not in
+ * the backup — see the README on why base64 in Local Storage would exhaust the
+ * quota. The callers render an empty slot.
+ */
 export async function getBlob(id) {
   const result = await transact('readonly', (store) => store.get(id));
-  return result ?? null;
+  return result instanceof Blob ? result : null;
 }
 
 export function deleteBlob(id) {
@@ -99,7 +128,11 @@ export function clearAll() {
  */
 export async function getObjectUrl(id) {
   const blob = await getBlob(id);
-  return blob ? URL.createObjectURL(blob) : null;
+  // `getBlob` already guarantees a Blob or null; the check is repeated here
+  // because handing a non-Blob to `createObjectURL` throws asynchronously, and
+  // an unhandled rejection from an image that simply is not on this device is a
+  // bad trade for one saved line.
+  return blob instanceof Blob ? URL.createObjectURL(blob) : null;
 }
 
 /**

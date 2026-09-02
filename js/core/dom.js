@@ -155,6 +155,12 @@ const ICON_PATHS = {
   info:      'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5M12 8h.01',
   close:     'M18 6 6 18M6 6l12 12',
   heart:     'M12 20s-7-4.4-7-9.5A3.9 3.9 0 0 1 12 8a3.9 3.9 0 0 1 7 2.5c0 5.1-7 9.5-7 9.5z',
+  // Two arrows trading places: a substitution, not a deletion.
+  swap:      'M7 4 3 8l4 4M3 8h13a4 4 0 0 1 0 8h-2M17 20l4-4-4-4',
+  // A line climbing to an arrowhead. Used where a trend is the subject rather
+  // than the axes are — the scorecard rows, not the charts.
+  trend:     'M3 17l6-6 4 4 8-8M21 7v6h-6',
+  warning:   'M12 3 2 20h20zM12 9v5M12 17h.01',
 };
 
 /**

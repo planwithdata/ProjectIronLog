@@ -23,6 +23,39 @@
  * is not evidence of getting weaker, and the engine must not respond to it by
  * cutting the load.
  *
+ * Repeatable load, not heaviest load
+ * ----------------------------------
+ * The load carried into the next session is the **repeatable** working load,
+ * not the heaviest set of the day. Those are different numbers and conflating
+ * them was a real bug: a single 72 kg flat dumbbell bench set logged among two
+ * 55 kg sets became the prescription for all three sets of the following week,
+ * at a load that had never been held twice.
+ *
+ * `repeatableLoad` reads it as the lower median of the completed repeatable
+ * sets, which is the heaviest load at least half the sets were actually
+ * performed at. On uniform sets — the normal case — that is simply the load. On
+ * a session with one heavier probe it is the load underneath the probe. On a
+ * week-one ramp logged as working sets (150/180/200/220) it is the second rung,
+ * which is the same reading a human gives those numbers and the same one the
+ * hand-written `WORKING_SET_REBASELINE` correction used to make by date.
+ *
+ * A set explicitly marked `kind: 'top'` is excluded outright, which is the
+ * precise version of the same idea. The median is what protects the sessions
+ * nobody remembered to tag.
+ *
+ * Rep targets are built the same way: only from the sets performed **at** that
+ * load. Five reps at 72 kg says nothing about what set three at 55 kg should
+ * be, so it is not allowed to set its target.
+ *
+ * Loads that are not comparable
+ * -----------------------------
+ * Machine and cable readings are arbitrary scales — see `engine/context.js`.
+ * When the load between two sessions moves further than any programmed
+ * increment could explain, or when the entry declares a different machine, the
+ * engine stops comparing: no stall is counted across the break, and the
+ * recommendation says why. It never converts between scales and never claims
+ * to know which machine a legacy number came from.
+ *
  * The rules it implements, verbatim from the program:
  *
  *   1. Pick a starting weight where the last 1-2 reps of the first set feel
@@ -56,6 +89,7 @@
  */
 
 import { incrementScale, DEFAULT_LOAD_PREFS } from './loading.js';
+import { contextKey, compareLoads, isMachineScaled, DEFAULT_CONTEXT } from './context.js';
 
 /** What the engine decided to do. */
 export const ACTIONS = {
@@ -66,6 +100,8 @@ export const ACTIONS = {
   DELOAD_WAVE: 'deload-wave',  // scheduled Week 5 deload
   DELOAD_STALL: 'deload-stall', // stalled 3 sessions — drop and rebuild
   DIFFICULTY:  'difficulty',   // earned a harder variation, not more load
+  MAINTAIN:    'maintain',     // quality work, deliberately not progressed
+  RE_ANCHOR:   're-anchor',    // the load scale changed; rebuild from here
 };
 
 /** Sessions without improvement before the stall rule fires. */
@@ -92,7 +128,11 @@ export const DELOAD_LOAD_FACTOR = 0.65;
  * @param {object}  [options.loadPrefs] display/increment conventions
  * @param {number|null} [options.baselineSetIndex]
  *        Read the load to carry forward from this working set (1-based)
- *        instead of from the heaviest one. See `baselineWeight`.
+ *        instead of from the repeatable one. See `baselineWeight`.
+ * @param {string} [options.contextKey]
+ *        The machine/attachment the coming session will use. When given, the
+ *        engine anchors on the newest performance from that same context and
+ *        says so when there is none. See `engine/context.js`.
  *
  * @returns {{
  *   action: string,
@@ -125,6 +165,15 @@ export function recommend(exercise, history = [], options = {}) {
     return recommendPyramid(exercise, history, { ...options, setCount, increment, range });
   }
 
+  // Quality work the program deliberately does not progress - the Pallof press.
+  // It branches before any of the load arithmetic because there is none: the
+  // point of the movement is bracing against rotation at a load you can hold
+  // position at, and ratcheting that up every week turns a 45-second core
+  // exercise into a grinding compound.
+  if (exercise.progression?.mode === 'maintain') {
+    return recommendMaintain(exercise, history, { ...options, setCount, increment, range });
+  }
+
   // Only real, loaded sessions inform a recommendation. A deload week is a
   // deliberate step backwards, so treating it as the new baseline would
   // ratchet the whole program down every fifth week.
@@ -149,33 +198,65 @@ export function recommend(exercise, history = [], options = {}) {
 
   const lastWeight = baselineWeight(last, options.baselineSetIndex);
   const lastReps = completedSets(last).map((set) => set.reps ?? 0);
+
+  // Rep history aligned to the sets performed *at* the anchor load. A set at a
+  // different load holds `null` rather than a number, because a heavier probe's
+  // rep count is not a target for the load underneath it.
+  const alignedReps = repsAtLoad(last, lastWeight);
+  const baselineReps = alignedReps.filter((reps) => reps !== null && reps > 0);
+  // A conservative floor for a set with no reading at this load: the weakest
+  // set that *was* performed at it. Not the bottom of the range, which on a
+  // 12-15 movement would prescribe a step backwards.
+  const repFloor = baselineReps.length ? Math.min(...baselineReps) : range.min;
+
+  const continuity = judgeContinuity(exercise, working, options);
+
   const previous = {
-    // What the next load is measured from, which is the heaviest completed set
-    // unless a baseline override says otherwise.
+    // What the next load is measured from: the repeatable working load, unless
+    // a baseline override says otherwise.
     weightKg: lastWeight,
     // Always the heaviest, so a caller showing "last session" still shows what
     // was actually lifted rather than the figure the engine chose to build on.
     topWeightKg: workingWeight(last),
     reps: lastReps,
+    repsAtLoad: baselineReps,
     date: last.date,
     painLimited: Boolean(last.painLimited),
+    // What the app asked for last time, kept alongside what was done so a
+    // caller can show both instead of quietly replacing one with the other.
+    targetWeightKg: last.targetWeightKg ?? null,
+    deviation: loadDeviation(last, lastWeight),
+    contextKey: contextKey(last),
+    contextChanged: continuity.contextChanged,
+    discontinuous: continuity.discontinuous,
   };
 
   // "All working sets at the top of the range" is judged against the sets
-  // actually prescribed. Hitting the top on three of four sets is a hold.
-  const atTop = lastReps.length >= setCount
-    && lastReps.slice(0, setCount).every((reps) => reps >= range.max);
+  // performed at the anchor load, compacted. Three sets at 55 kg plus one probe
+  // at 72 is three sets, not four - and the probe cannot help earn an increase
+  // for a load it was not performed at.
+  const atTop = baselineReps.length >= setCount
+    && baselineReps.slice(0, setCount).every((reps) => reps >= range.max);
 
-  const stalledSessions = countStalledSessions(judgeableHistory(working, exercise), range, setCount);
-
-  // When a baseline override actually moved the anchor, say so on the card.
-  // A load that drops without explanation reads as the app losing track of a
-  // session, and the user has no way to tell that from a deliberate reset.
-  const explain = (result) => (
-    lastWeight === previous.topWeightKg
-      ? result
-      : { ...result, reason: `${result.reason} ${baselineNote(options.baselineSetIndex, lastWeight, previous.topWeightKg)}` }
+  // Stalling is only judged across performances whose loads mean the same
+  // thing. A machine change is not three sessions of no progress.
+  const stalledSessions = countStalledSessions(
+    judgeableHistory(continuity.comparableRun, exercise), range, setCount
   );
+
+  // Append every caveat that actually applies: a moved anchor, a scale break, a
+  // deviation from what was planned.
+  const explain = (result) => {
+    const notes = [
+      lastWeight === previous.topWeightKg
+        ? null
+        : baselineNote(options.baselineSetIndex, lastWeight, previous.topWeightKg),
+      continuity.note,
+      deviationNote(previous.deviation),
+    ].filter(Boolean);
+
+    return notes.length ? { ...result, reason: `${result.reason} ${notes.join(' ')}` } : result;
+  };
 
   /* --- Scheduled deload week ------------------------------------------ */
   if (options.isDeload) {
@@ -190,6 +271,25 @@ export function recommend(exercise, history = [], options = {}) {
       previous,
       atTopOfRange: atTop,
       stalledSessions,
+    });
+  }
+
+  /* --- The scale changed: rebuild from the new reading ----------------- */
+  // Before the stall and advance branches, because neither question can be
+  // answered across a break. What the last session managed at another
+  // machine's numbers says nothing about what to load on this one.
+  if (continuity.discontinuous || continuity.contextChanged) {
+    return explain({
+      action: ACTIONS.RE_ANCHOR,
+      weightKg: lastWeight,
+      perSetReps: nextRepTargets(alignedReps, setCount, range, repFloor),
+      increment,
+      reason: lastWeight === null
+        ? 'Repeat last session and chase reps rather than load.'
+        : `Work from last session's reading of ${trim(lastWeight)} kg and chase reps, not load.`,
+      previous,
+      atTopOfRange: atTop,
+      stalledSessions: 0,
     });
   }
 
@@ -241,9 +341,9 @@ export function recommend(exercise, history = [], options = {}) {
   return explain({
     action: repsFirst ? ACTIONS.REPS_FIRST : ACTIONS.HOLD,
     weightKg: lastWeight,
-    perSetReps: nextRepTargets(lastReps, setCount, range),
+    perSetReps: nextRepTargets(alignedReps, setCount, range, repFloor),
     increment,
-    reason: holdReason({ exercise, last, lastWeight, range, repsFirst }),
+    reason: holdReason({ exercise, last, lastWeight, range, repsFirst, baselineReps, setCount }),
     previous,
     atTopOfRange: false,
     stalledSessions,
@@ -252,13 +352,170 @@ export function recommend(exercise, history = [], options = {}) {
 
 /**
  * One sentence explaining that the load was anchored somewhere other than the
- * top set. Only ever appended when the two figures actually differ.
+ * heaviest set. Only ever appended when the two figures actually differ.
+ *
+ * Two phrasings, because there are two reasons they can differ: an explicit
+ * `baselineSetIndex` override, or - far more often now - the ordinary reading
+ * of a session that contained one heavier set than the rest.
  */
 function baselineNote(setIndex, baseline, top) {
   const from = baseline === null ? 'bodyweight' : `${trim(baseline)} kg`;
   const was = top === null ? 'bodyweight' : `${trim(top)} kg`;
-  return `Measured from working set ${setIndex} (${from}) rather than the ${was} top set, `
-    + 'because a working set is a load you repeat, not a limit you probe.';
+
+  if (setIndex) {
+    return `Measured from working set ${setIndex} (${from}) rather than the ${was} top set, `
+      + 'because a working set is a load you repeat, not a limit you probe.';
+  }
+
+  return `Measured from ${from}, the load you actually repeated, rather than the ${was} top set - `
+    + 'a weight pushed once is not the weight for every set.';
+}
+
+/**
+ * How far the performed load sat from what the app asked for.
+ *
+ * Returned as data rather than folded into the recommendation, because the two
+ * facts are both true and the app must not overwrite one with the other. The
+ * engine builds on what was *done* - that is what the body did - while the plan
+ * is kept so the deviation itself can be reported and read.
+ *
+ * @returns {{plannedKg: number, performedKg: number|null, deltaKg: number}|null}
+ */
+function loadDeviation(performance, performedKg) {
+  const planned = performance?.targetWeightKg;
+  if (planned === null || planned === undefined) return null;
+  if (performedKg === null || performedKg === undefined) return null;
+  const deltaKg = round2(performedKg - planned);
+  if (Math.abs(deltaKg) < 0.01) return null;
+  return { plannedKg: round2(planned), performedKg: round2(performedKg), deltaKg };
+}
+
+/**
+ * A sentence naming the deviation, appended to the reason.
+ *
+ * Deliberately does not scold or correct: the number the body moved is the
+ * real one, and a single session above or below plan is information, not an
+ * instruction to re-plan. Saying it out loud is what stops the app looking as
+ * though it silently lost the target.
+ */
+function deviationNote(deviation) {
+  if (!deviation) return null;
+  const direction = deviation.deltaKg > 0 ? 'above' : 'below';
+  return `Last session was planned at ${trim(deviation.plannedKg)} kg and performed at `
+    + `${trim(deviation.performedKg)} kg - ${trim(Math.abs(deviation.deltaKg))} kg ${direction} plan. `
+    + 'Today builds on what was performed.';
+}
+
+/**
+ * Whether the last performance's load may be compared with the one before it,
+ * and which run of recent performances are comparable to each other.
+ *
+ * Three ways a comparison can be refused:
+ *
+ *   - the coming session declares a context (`options.contextKey`) that the
+ *     last performance was not logged in;
+ *   - the last two performances declare different contexts;
+ *   - on a machine-scaled movement, the load moved further between them than
+ *     any programmed increment could explain.
+ *
+ * The third is a suspicion rather than a fact, and its wording says so. None of
+ * them alter a stored number, and none of them hide a session: they only stop
+ * the engine drawing a strength conclusion from a change of scale.
+ *
+ * @returns {{contextChanged: boolean, discontinuous: boolean, note: string|null,
+ *            comparableRun: Array<object>}}
+ */
+function judgeContinuity(exercise, working, options = {}) {
+  const machineScaled = isMachineScaled(exercise);
+  const last = working[0] ?? null;
+  if (!last) {
+    return { contextChanged: false, discontinuous: false, note: null, comparableRun: working };
+  }
+
+  const lastKey = contextKey(last);
+  const wanted = options.contextKey ?? null;
+
+  // Walk back from the newest performance for as long as loads stay comparable.
+  // That run - and only it - is what stall detection and trend lines may read.
+  const comparableRun = [last];
+  let breakReason = null;
+
+  for (let index = 1; index < working.length; index += 1) {
+    const older = working[index];
+    const newer = working[index - 1];
+
+    if (contextKey(older) !== contextKey(newer)) {
+      if (index === 1) breakReason = 'context';
+      break;
+    }
+
+    // A session logged before warm-ups and working sets were told apart has a
+    // working load that is a reading of a mixed list, not a measurement. It
+    // still supplies the load — it is the only record there is — but it is not
+    // compared against a classified session, because week one's face pulls
+    // (11.3 / 13.6 / 6.8 / 6.8) would otherwise make the following week's clean
+    // 13.6 look like a machine change.
+    if (older.legacy || newer.legacy) {
+      if (index === 1) breakReason = 'unclassified';
+      break;
+    }
+
+    if (machineScaled) {
+      const move = compareLoads(repeatableLoad(older), repeatableLoad(newer));
+      if (move.discontinuous) {
+        if (index === 1) breakReason = 'discontinuity';
+        break;
+      }
+    }
+
+    comparableRun.push(older);
+  }
+
+  // A declared context the history has never seen is the strongest break there
+  // is: nothing in the log was measured on this scale.
+  if (wanted && wanted !== DEFAULT_CONTEXT && wanted !== lastKey) {
+    const seen = working.some((entry) => contextKey(entry) === wanted);
+    return {
+      contextChanged: true,
+      discontinuous: false,
+      note: seen
+        ? 'The last session was on a different machine, so its load is not the one to set here.'
+        : 'First session logged on this machine, so its numbers have no history yet. Pick a load '
+          + 'where the last 1-2 reps are genuinely hard and let the reps do the progressing.',
+      comparableRun: [],
+    };
+  }
+
+  if (breakReason === 'context') {
+    return {
+      contextChanged: true,
+      discontinuous: false,
+      note: 'Logged on a different machine or attachment from the session before it, so the two '
+        + 'loads are not comparable and no stall is counted across the change.',
+      comparableRun,
+    };
+  }
+
+  if (breakReason === 'discontinuity') {
+    return {
+      contextChanged: false,
+      discontinuous: true,
+      note: 'The load moved by far more than a programmed increment, which usually means a '
+        + 'different machine rather than a change in strength. Tag the machine on this exercise '
+        + 'and the history will stop reading it as one.',
+      comparableRun,
+    };
+  }
+
+  // Only the run is shortened. No caveat is added to the card and no re-anchor
+  // is triggered: ordinary double progression from an unclassified session is
+  // the right behaviour, and the only thing that would be wrong is counting a
+  // stall across it.
+  if (breakReason === 'unclassified') {
+    return { contextChanged: false, discontinuous: false, note: null, comparableRun };
+  }
+
+  return { contextChanged: false, discontinuous: false, note: null, comparableRun };
 }
 
 /**
@@ -268,7 +525,7 @@ function baselineNote(setIndex, baseline, top) {
  * elbow hurt last Wednesday to "add a rep to any set below 10" is the app
  * pushing them into the exact rep that hurt.
  */
-function holdReason({ exercise, last, lastWeight, range, repsFirst }) {
+function holdReason({ exercise, last, lastWeight, range, repsFirst, baselineReps = [], setCount = 0 }) {
   if (last?.painLimited && exercise?.painAware) {
     return `Last session was cut short by discomfort. Repeat it only as far as it stays pain-free — `
       + `${range.label} reps is the target, not a requirement.`;
@@ -276,8 +533,29 @@ function holdReason({ exercise, last, lastWeight, range, repsFirst }) {
   if (repsFirst) {
     return `Add a rep to any set below ${range.max}. No added load until every set hits ${range.max}.`;
   }
-  return `Stay at ${lastWeight === null ? 'the same weight' : `${trim(lastWeight)} kg`} `
+
+  const base = `Stay at ${lastWeight === null ? 'the same weight' : `${trim(lastWeight)} kg`} `
     + `and add a rep to any set below ${range.max}.`;
+
+  // A set at the top of the range next to sets well below it is the case the
+  // brief singles out: 12/8/8 contains a 12, and reading the 12 as the story of
+  // the session is how a load gets prescribed that only one set earned. Name
+  // the spread so the reason matches the numbers on the card.
+  const spread = baselineReps.length > 1
+    ? Math.max(...baselineReps) - Math.min(...baselineReps)
+    : 0;
+
+  if (spread >= 3) {
+    return `${base} Sets ran ${baselineReps.join('/')} last time — the later sets are what the load `
+      + 'is judged on, so the weight moves once all of them reach the top, not just the first.';
+  }
+
+  if (setCount && baselineReps.length && baselineReps.length < setCount) {
+    return `${base} Only ${baselineReps.length} of ${setCount} sets were logged at this load last `
+      + 'time, so it has not been earned yet.';
+  }
+
+  return base;
 }
 
 /**
@@ -423,6 +701,68 @@ function recommendDifficulty(exercise, history, {
   };
 }
 
+/* --- Maintained (deliberately un-progressed) work ----------------------
+   Some movements exist to be done well, not to be loaded up. The Pallof press
+   is one: it is an anti-rotation brace, its prescription is a fixed rep count
+   per side, and its useful load is whatever you can hold position against. Put
+   it on a double-progression ladder and within a month it is a slow, heavy,
+   ten-minute finisher at the end of an already long chest day - which is
+   exactly the complaint that produced this branch.
+
+   So it holds its load, prescribes its reps, and says so. It never advances,
+   never counts a stall, and never triggers a deload: there is nothing to
+   deload from. The load is still logged and still editable, because a load
+   that is not progressed is not the same thing as a load that is not recorded.
+   ====================================================================== */
+
+function recommendMaintain(exercise, history, { isDeload, setCount, increment, range }) {
+  const working = history.filter((entry) => !entry.isDeload && completedSets(entry).length > 0);
+  const last = working[0] ?? null;
+  const holdLabel = exercise.tempo?.label ? ` ${exercise.tempo.label}` : '';
+
+  const base = {
+    action: ACTIONS.MAINTAIN,
+    increment,
+    perSetReps: fill(setCount, range.max),
+    atTopOfRange: false,
+    stalledSessions: 0,
+    maintained: true,
+  };
+
+  if (!last) {
+    return {
+      ...base,
+      weightKg: null,
+      reason: `Quality work, not a progression lift. ${range.label} reps at a load you can hold `
+        + `position against.${holdLabel}`,
+      previous: null,
+    };
+  }
+
+  const lastWeight = repeatableLoad(last);
+
+  return {
+    ...base,
+    weightKg: isDeload && lastWeight !== null
+      ? roundTo(lastWeight * DELOAD_LOAD_FACTOR, increment)
+      : lastWeight,
+    reason: `Not a progression lift - hold ${lastWeight === null ? 'a comfortable load' : `${trim(lastWeight)} kg`} `
+      + `and keep the reps clean. Adjust the load only if bracing gets easy or the position breaks down.${holdLabel}`,
+    previous: {
+      weightKg: lastWeight,
+      topWeightKg: workingWeight(last),
+      reps: completedSets(last).map((set) => set.reps ?? 0),
+      date: last.date,
+      painLimited: Boolean(last.painLimited),
+      targetWeightKg: last.targetWeightKg ?? null,
+      deviation: loadDeviation(last, lastWeight),
+      contextKey: contextKey(last),
+      contextChanged: false,
+      discontinuous: false,
+    },
+  };
+}
+
 /* --- Pyramid sets -------------------------------------------------------
    Some prescriptions ramp the load across sets — 10/15/20 kg for 12/10/8 reps.
    Double progression still applies, just per rung: each set has its own load
@@ -539,15 +879,20 @@ function maxOrNull(values) {
  *
  *   [8, 8, 7, 6] in a 6-8 range -> [8, 8, 8, 7]
  *
- * Sets with no prior data (a set count that grew, or a skipped set) start at
- * the bottom of the range rather than inheriting a neighbour's number.
+ * Sets with no prior data start at `fallback`, which defaults to the bottom of
+ * the range. Callers that know better pass something better: a set logged at a
+ * *different* load has no rep target of its own, and prescribing the bottom of
+ * a 12-15 range for it would ask for a step backwards. `recommend` passes the
+ * weakest set that was performed at the anchor load, which is a target that is
+ * both achievable and honest about being a guess.
  */
-export function nextRepTargets(lastReps, setCount, range) {
+export function nextRepTargets(lastReps, setCount, range, fallback = null) {
+  const floor = clamp(fallback ?? range.min, range.min, range.max);
   const targets = [];
   for (let index = 0; index < setCount; index += 1) {
     const previous = lastReps[index];
     if (previous === undefined || previous === null || previous <= 0) {
-      targets.push(range.min);
+      targets.push(floor);
     } else if (previous >= range.max) {
       targets.push(range.max);
     } else {
@@ -561,9 +906,16 @@ export function nextRepTargets(lastReps, setCount, range) {
 /**
  * How many consecutive recent sessions showed no improvement.
  *
- * A session improved on the one before it if the weight went up, or the
- * weight held and total reps went up. Comparing totals rather than set-by-set
- * means moving a rep from set 4 to set 1 does not read as progress.
+ * A session improved on the one before it if the repeatable load went up, or
+ * the load held and total reps at that load went up. Comparing totals rather
+ * than set-by-set means moving a rep from set 4 to set 1 does not read as
+ * progress; measuring at the repeatable load rather than the heaviest set means
+ * a one-off probe cannot fake a session's worth of progress and then leave the
+ * next session looking like a regression.
+ *
+ * The caller decides which performances are eligible: `recommend` passes only
+ * the run of recent sessions whose loads are mutually comparable, so a machine
+ * change never accumulates towards a stall.
  */
 export function countStalledSessions(working, range, setCount) {
   if (working.length < 2) return 0;
@@ -600,8 +952,12 @@ export function isEntryComplete(entry) {
  * result of the session is visible before leaving the gym.
  */
 export function earnedAdvance(exercise, sets) {
-  const done = sets.filter((set) => set.completed && (set.reps ?? 0) > 0);
+  const done = (sets ?? []).filter((set) => set.completed && (set.reps ?? 0) > 0);
   if (done.length < exercise.sets) return false;
+
+  // Movements the program does not progress cannot earn a load increase, and
+  // showing "Next: +1 kg" on the Pallof press is how one starts climbing.
+  if (exercise.progression?.mode === 'maintain') return false;
 
   // A pyramid is judged rung by rung against its own targets, not against a
   // single shared range top.
@@ -611,13 +967,21 @@ export function earnedAdvance(exercise, sets) {
       .every((step, index) => (done[index]?.reps ?? 0) >= (step.reps ?? 0));
   }
 
+  // Judged at the repeatable load, and only on the sets performed there: the
+  // heavier probe among them was never the working weight, so it can neither
+  // earn the increase nor be asked to.
+  const load = repeatableLoad({ sets: done });
+  const atLoad = repsAtLoad({ sets: done }, load)
+    .filter((value) => value !== null && value > 0);
+  if (atLoad.length < exercise.sets) return false;
+
   const range = repRange(exercise);
-  return done.slice(0, exercise.sets).every((set) => (set.reps ?? 0) >= range.max);
+  return atLoad.slice(0, exercise.sets).every((reps) => reps >= range.max);
 }
 
 /** The load to suggest next time, given what was just done. */
 export function nextWeight(exercise, sets) {
-  const weight = workingWeight({ sets });
+  const weight = repeatableLoad({ sets });
   if (weight === null) return null;
   return earnedAdvance(exercise, sets) ? weight + incrementFor(exercise) : weight;
 }
@@ -658,17 +1022,84 @@ export function programIncrement(exercise) {
   return increment?.min ?? 2.5;
 }
 
+/** How close two loads have to be to count as the same load. */
+const LOAD_EPSILON = 0.01;
+
 /** Completed sets with a real rep count. */
 function completedSets(entry) {
-  return (entry.sets ?? []).filter((set) => set.completed && (set.reps ?? 0) > 0);
+  return (entry?.sets ?? []).filter((set) => set.completed && (set.reps ?? 0) > 0);
 }
 
 /**
- * The session's working weight: the heaviest load actually completed.
+ * Completed sets that represent a load meant to be repeated.
  *
- * Heaviest rather than first, because a lifter who works up across sets is
- * still working at the top load — anchoring to set one would stall them.
- * Returns null when nothing was loaded (pure bodyweight work).
+ * Sets explicitly marked `kind: 'top'` are a probe at a limit and are left out.
+ * If every set was marked that way the filter would leave nothing to prescribe
+ * from, so it falls back to all of them: "these were all probes" is still a
+ * session, and refusing to read it would be worse than reading it coarsely.
+ */
+function completedRepeatable(entry) {
+  const done = completedSets(entry);
+  const repeatable = done.filter((set) => set.kind !== 'top');
+  return repeatable.length ? repeatable : done;
+}
+
+function sameLoad(a, b) {
+  if (a === null || a === undefined) return b === null || b === undefined;
+  if (b === null || b === undefined) return false;
+  return Math.abs(Number(a) - Number(b)) < LOAD_EPSILON;
+}
+
+/**
+ * The **repeatable** working load of a session: the load at least half the
+ * completed working sets were actually performed at.
+ *
+ * Implemented as the lower median of those loads, which is the same thing and
+ * needs no tie-breaking rules:
+ *
+ *   55 / 55 / 55        -> 55    the ordinary case, unchanged
+ *   55 / 55 / 72        -> 55    two working sets and one probe
+ *   150 / 180 / 200/220 -> 180   a week-one ramp logged as working sets
+ *   45 / 55             -> 45    two loads, neither repeated: the lower one
+ *
+ * The lower median rather than the upper, deliberately. Where the sets
+ * disagree, the load you can be sure of is the one you did *at least* half your
+ * sets at, and a prescription that is slightly too light costs one session of
+ * rep progress while one that is too heavy costs a month of grinding and a
+ * false stall. Returns null when nothing was loaded (bodyweight work).
+ */
+export function repeatableLoad(entry) {
+  const loads = completedRepeatable(entry)
+    .map((set) => set.weightKg)
+    .filter((weight) => weight !== null && weight !== undefined)
+    .map(Number)
+    .filter((weight) => Number.isFinite(weight))
+    .sort((a, b) => a - b);
+
+  if (!loads.length) return null;
+  return loads[Math.floor((loads.length - 1) / 2)];
+}
+
+/**
+ * Rep counts aligned to the completed sets, with `null` wherever a set was not
+ * performed at `load`.
+ *
+ * Positions are preserved rather than compacted, so a per-set rep target lands
+ * on the set it belongs to. A bodyweight movement (load `null`) matches every
+ * set, which is what makes this safe to call unconditionally.
+ */
+export function repsAtLoad(entry, load) {
+  return completedSets(entry).map((set) =>
+    (sameLoad(set.weightKg, load) ? (set.reps ?? 0) : null));
+}
+
+/**
+ * The heaviest load actually completed in a session.
+ *
+ * This is a *display and record* figure, not a prescription: it is what to show
+ * as "top set" and what the heaviest-weight PR is measured on. The load the
+ * next session is built from is `repeatableLoad`, which is a different question
+ * and usually a different number. Returns null for pure bodyweight work.
  */
 export function workingWeight(entry) {
   const loads = completedSets(entry)
@@ -681,38 +1112,38 @@ export function workingWeight(entry) {
 /**
  * The load the next session should be built on.
  *
- * Normally that is `workingWeight` — the heaviest set actually completed —
- * because someone who works up across their sets is still working at the top
- * load, and anchoring to set one would stall them.
+ * Normally `repeatableLoad` — the load at least half the working sets were
+ * actually performed at. That is the whole of the correction described at the
+ * top of this file, and it is now the default rather than a dated exception:
+ * `config.WORKING_SET_REBASELINE` existed to make this reading by hand for one
+ * week of untagged history, and it no longer has to.
  *
- * `setIndex` (1-based) overrides that with one nominated working set. It exists
- * for the opposite case: sets logged as a ramp, where the top set was a probe
- * at a limit rather than a load meant to be repeated four times. Carrying the
- * probe forward would prescribe a weight that was never held for a working set.
- *
- * Falls back to the heaviest set whenever the nominated one cannot answer —
- * a session with fewer sets than the index, or a bodyweight movement where the
- * set carries no load. That fallback is why passing an index is always at
- * worst a no-op, never a hole in the prescription.
+ * `setIndex` (1-based) still overrides it with one nominated working set, for
+ * the cases where the user knows something the numbers do not say. Falls back
+ * to the repeatable load whenever the nominated set cannot answer — a session
+ * with fewer sets than the index, or a bodyweight movement where the set
+ * carries no load — so passing an index is at worst a no-op, never a hole in
+ * the prescription.
  *
  * Reads *completed* sets, in the order they were logged, which is the same
  * sequence every other judgement in this module is made against.
  */
 export function baselineWeight(entry, setIndex = null) {
-  const top = workingWeight(entry);
-  if (!setIndex || setIndex < 1) return top;
+  const repeatable = repeatableLoad(entry);
+  if (!setIndex || setIndex < 1) return repeatable;
 
   const nominated = completedSets(entry)[setIndex - 1]?.weightKg;
-  if (nominated === null || nominated === undefined) return top;
-  return nominated;
+  if (nominated === null || nominated === undefined) return repeatable;
+  return Number(nominated);
 }
 
 function summarise(entry) {
-  const sets = completedSets(entry);
+  const load = repeatableLoad(entry);
+  const reps = repsAtLoad(entry, load).filter((value) => value !== null && value > 0);
   return {
-    weight: workingWeight(entry),
-    totalReps: sets.reduce((total, set) => total + (set.reps ?? 0), 0),
-    setCount: sets.length,
+    weight: load,
+    totalReps: reps.reduce((total, value) => total + value, 0),
+    setCount: reps.length,
   };
 }
 
@@ -749,6 +1180,8 @@ export function actionLabel(action) {
     case ACTIONS.DELOAD_WAVE:  return 'Deload';
     case ACTIONS.DELOAD_STALL: return 'Reset load';
     case ACTIONS.DIFFICULTY:   return 'Harder variation';
+    case ACTIONS.MAINTAIN:     return 'Quality work';
+    case ACTIONS.RE_ANCHOR:    return 'New load scale';
     default:                   return '';
   }
 }
@@ -761,6 +1194,8 @@ export function actionTone(action) {
     case ACTIONS.DELOAD_WAVE:  return 'warning';
     case ACTIONS.START:        return 'accent';
     case ACTIONS.DIFFICULTY:   return 'success';
+    case ACTIONS.RE_ANCHOR:    return 'warning';
+    case ACTIONS.MAINTAIN:     return '';
     default:                   return '';
   }
 }

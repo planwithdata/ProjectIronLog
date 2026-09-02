@@ -10,7 +10,7 @@
  * in the log.
  */
 
-import { el, icon, replace } from '../core/dom.js';
+import { el, icon } from '../core/dom.js';
 import { go, refresh } from '../core/router.js';
 import { toast } from '../core/events.js';
 import { formatDate, relativeDay, today, trimNumber, pluralize } from '../core/format.js';

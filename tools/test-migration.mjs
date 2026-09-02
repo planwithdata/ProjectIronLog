@@ -32,6 +32,18 @@ import { storage } from '../js/services/storage-adapter.js';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DB_URL = new URL('../js/services/db.js', import.meta.url).href;
 
+/**
+ * The version a migrated database should land on, read from the module rather
+ * than written out here.
+ *
+ * These tests assert *losslessness*, not a particular version number: hard
+ * coding the current one meant every schema bump broke seven passing tests and
+ * said nothing about whether any data had been lost. The one place a literal
+ * still belongs is the *source* version of each fixture, which is a fact about
+ * the fixture and is written into it.
+ */
+const { SCHEMA_VERSION: CURRENT } = await import(DB_URL);
+
 let bootCount = 0;
 
 /** Boot a fresh db module against the shared storage. */
@@ -287,8 +299,8 @@ test('v1 -> v2 seeds Training Preferences with the documented conventions', asyn
 test('the schema version is bumped and recorded', async () => {
   await seedV1(v1Fixture());
   const db = await boot();
-  assert.equal(db.read('meta').schemaVersion, 3);
-  assert.equal(db.SCHEMA_VERSION, 3);
+  assert.equal(db.read('meta').schemaVersion, CURRENT);
+  assert.equal(db.SCHEMA_VERSION, CURRENT);
 });
 
 /* --- v2 -> v3: the mislogged squat -------------------------------------- */
@@ -363,7 +375,7 @@ test('re-running v2 -> v3 over relabelled data changes nothing', async () => {
   assert.deepEqual(second.read('sessions'), afterFirst, 'a second pass is a no-op');
 });
 
-test('the whole week of real history moves to hack-squat', async (t) => {
+test('no real session is left pointing at a relabelled exercise id', async (t) => {
   const real = realBackup();
   if (!real) return t.skip('no ironlog-backup-*.json in the repo root');
 
@@ -373,17 +385,29 @@ test('the whole week of real history moves to hack-squat', async (t) => {
   await db.importAll(real.payload);
 
   const sessions = db.read('sessions');
-  const squat = sessions
-    .flatMap((session) => session.entries)
-    .filter((entry) => entry.exerciseId === 'hack-squat');
+  const entries = sessions.flatMap((session) => session.entries);
 
-  assert.equal(squat.length, 1, 'week one logged it once');
-  assert.deepEqual(squat[0].sets.map((set) => set.weightKg), [150, 180, 200, 220]);
-  assert.deepEqual(squat[0].sets.map((set) => set.reps), [12, 10, 8, 6]);
   assert.equal(
-    sessions.flatMap((s) => s.entries).some((e) => e.exerciseId === 'back-squat'), false,
+    entries.some((entry) => entry.exerciseId === 'back-squat'), false,
     'nothing is left pointing at the retired id'
   );
+
+  // Whatever the backup happened to contain, the squat week's own numbers have
+  // to arrive intact under the id that now owns them. Asserted by value rather
+  // than by count: the fixture is a live file and gains a session every week.
+  const before = real.payload.data.sessions
+    .flatMap((session) => session.entries)
+    .filter((entry) => entry.exerciseId === 'back-squat' || entry.exerciseId === 'hack-squat');
+  const after = entries.filter((entry) => entry.exerciseId === 'hack-squat');
+
+  assert.equal(after.length, before.length, 'every squat entry survives the relabel');
+  for (const [index, expected] of before.entries()) {
+    assert.deepEqual(
+      after[index].sets.map((set) => [set.weightKg, set.reps]),
+      expected.sets.map((set) => [set.weightKg, set.reps]),
+      `squat entry ${index} kept its loads and reps`
+    );
+  }
 });
 
 /* --- The parachute ------------------------------------------------------ */
@@ -454,7 +478,7 @@ test('booting an already-current database runs no migration', async () => {
 
   const second = await boot();
   assert.deepEqual(second.read('sessions'), before);
-  assert.equal(second.read('meta').schemaVersion, 3);
+  assert.equal(second.read('meta').schemaVersion, CURRENT);
 });
 
 /* --- Edge cases --------------------------------------------------------- */
@@ -464,7 +488,7 @@ test('a fresh install needs no migration and no parachute', async () => {
   await storage.remove('__premigration');
 
   const db = await boot();
-  assert.equal(db.read('meta').schemaVersion, 3);
+  assert.equal(db.read('meta').schemaVersion, CURRENT);
   assert.deepEqual(db.read('sessions'), []);
   assert.equal(await db.getPreMigrationSnapshot(), null, 'nothing to parachute on day one');
   assert.equal(db.read('meta').preMigrationBackupAt, null);
@@ -478,7 +502,7 @@ test('sessions with no meta record are still treated as v1', async () => {
   const db = await boot();
   const entry = db.read('sessions')[0].entries[0];
   assert.equal(entry.setModel, 'legacy', 'the safety net caught it');
-  assert.equal(db.read('meta').schemaVersion, 3);
+  assert.equal(db.read('meta').schemaVersion, CURRENT);
 });
 
 test('an entry with no sets array survives', async () => {
@@ -512,7 +536,7 @@ test('a v1 backup imported into a current database is migrated on the way in', a
   assert.equal(sessions.length, 2, 'both sessions restored');
   assert.equal(sessions[0].entries[0].setModel, 'legacy', 'restored history is classified');
   assert.equal(sessions[0].entries[0].sets[0].weightKg, 150, 'loads survive the round trip');
-  assert.equal(db.read('meta').schemaVersion, 3);
+  assert.equal(db.read('meta').schemaVersion, CURRENT);
   assert.deepEqual(db.read('bodyWeight'), fixture.bodyWeight);
 });
 
@@ -521,7 +545,7 @@ test('an export round-trips without loss', async () => {
   const db = await boot();
 
   const exported = JSON.parse(JSON.stringify(db.exportAll()));
-  assert.equal(exported.schemaVersion, 3);
+  assert.equal(exported.schemaVersion, CURRENT);
 
   const sessionsBefore = JSON.parse(JSON.stringify(db.read('sessions')));
   await db.importAll(exported);
@@ -535,7 +559,9 @@ test('an export round-trips without loss', async () => {
 const real = realBackup();
 
 test('the real backup migrates losslessly', { skip: real ? false : 'no backup file in the repo root' }, async () => {
-  await seedV1(real.payload.data);
+  // The fixture is seeded as v1 whatever version it was exported at, so the
+  // whole migration chain runs over real data every time a link is added.
+  await seedV1({ ...real.payload.data, meta: { ...real.payload.data.meta, schemaVersion: 1 } });
   const db = await boot();
 
   const before = real.payload.data.sessions;
@@ -565,5 +591,6 @@ test('the real backup migrates losslessly', { skip: real ? false : 'no backup fi
   }
 
   const snapshot = await db.getPreMigrationSnapshot();
+  assert.ok(snapshot, 'a parachute was written before anything was touched');
   assert.deepEqual(snapshot.data.sessions, before, 'the parachute holds the real v1 sessions');
 });

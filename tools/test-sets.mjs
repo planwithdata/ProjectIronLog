@@ -150,14 +150,29 @@ test('a dumbbell total is displayed per hand without changing what is stored', (
   assert.equal(described.qualifier, '/ hand');
   assert.equal(described.storedKg, 55, 'storage is untouched');
   assert.equal(described.secondaryKg, 55);
-  assert.equal(described.secondaryQualifier, 'total');
+  // "total (both)" rather than "total": with a per-hand figure printed beside
+  // it, a bare "total" is exactly the ambiguity the label exists to remove.
+  assert.equal(described.secondaryQualifier, 'total (both)');
+  assert.equal(described.perHandKg, 27.5, 'both readings are always carried');
+  assert.equal(described.totalKg, 55);
 });
 
 test('the per-hand display is a preference, not a rule', () => {
   const described = describeLoad(dumbbellPress, 55, { dumbbellDisplay: 'total' });
   assert.equal(described.displayKg, 55);
-  assert.equal(described.qualifier, 'total');
+  assert.equal(described.qualifier, 'total (both)');
   assert.equal(described.secondaryKg, 27.5, 'the per-hand figure is still offered');
+  assert.equal(described.perHandKg, 27.5, 'and both readings survive the swap');
+  assert.equal(described.totalKg, 55);
+});
+
+test('a dumbbell load can never be printed without saying which figure it is', () => {
+  for (const prefs of [{ dumbbellDisplay: 'per-hand' }, { dumbbellDisplay: 'total' }]) {
+    const described = describeLoad(dumbbellPress, 72, prefs);
+    assert.ok(described.qualifier, 'the primary figure is always qualified');
+    assert.ok(described.secondaryQualifier, 'and so is the one beside it');
+    assert.equal(described.perHandKg, 36, '72 kg of dumbbells is 36 in each hand');
+  }
 });
 
 test('a barbell shows plates, with the bar only as a secondary estimate', () => {

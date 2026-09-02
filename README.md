@@ -4,12 +4,6 @@ A personal gym companion. Mobile-first Progressive Web App: installable on an
 iPhone Home Screen, works offline, stores everything on the device, and never
 talks to a server.
 
-<<<<<<< HEAD
-=======
-**Version 1.7.0 — six build sessions delivered.** Session 6 separates warm-up,
-working and intensity sets, and teaches the app how Rish actually logs a load.
-See [Rish's Training Preferences](#rishs-training-preferences).
-
 ---
 
 ## What it does today
@@ -19,9 +13,12 @@ See [Rish's Training Preferences](#rishs-training-preferences).
 | Design system, app shell, navigation | Done |
 | Home page | Done |
 | Program data parsed from source documents | Done — 38 exercises across 5 training days |
-| Progressive overload engine | Done — double progression, deload wave, stall detection, **working sets only** |
-| Warm-up / working / intensity set model | Done — separate in the data model, not just the UI |
+| Progressive overload engine | Done — double progression, deload wave, stall detection, **working sets only**, **repeatable load not heaviest set** |
+| Warm-up / working / top / intensity set model | Done — separate in the data model, not just the UI |
 | Load conventions (plates, per-hand, raw machine) | Done — display-side, never rewrites stored numbers |
+| Machine and attachment context | Done — loads compared only within one machine; untagged jumps flagged, never guessed |
+| Substitutions | Done — performed work in a planned slot, with its own load series |
+| Flexible scheduling | Done — any day's workout on any day, planned and actual dates both kept |
 | Pain-aware logging | Done — optional, non-diagnostic, excluded from stall detection |
 | Body weight & scale entry | Done — morning reminder, quick sheet, full Body tab |
 | Training Preferences | Done — configurable, not hardcoded |
@@ -30,7 +27,8 @@ See [Rish's Training Preferences](#rishs-training-preferences).
 | Storage layer with backup & restore | Done |
 | Theme (dark / light / system), units (kg / lb) | Done |
 | PWA: manifest, icons, offline cache | Done |
-| Progress dashboard | Done — weight, composition, strength, volume, consistency, PRs |
+| Progress dashboard | Done — the reading first, then strength, adherence, muscle groups, the wave, deload response, volume, consistency, records, body |
+| Training insights engine | Done — per-exercise status, load-vs-reps attribution, stall and grind detection — pure, tested |
 | Reports — PDF, CSV, JSON | Done |
 | Progress photos, coach notes, recovery, measurements | Done |
 | Two-week review generator | Done — rule-based, traceable |
@@ -44,14 +42,13 @@ See [Rish's Training Preferences](#rishs-training-preferences).
 | | |
 |---|---|
 | Shell payload | 243 KB cold (31 requests, incl. the 35 KB program file) · first paint ~70 ms locally |
-| Engine tests | 121 assertions (`node --test tools/test*.mjs`) |
-| Integration tests | 117 assertions (`tools/e2e.html`) |
+| Engine tests | 207 assertions (`node --test tools/test*.mjs`), including the real training log |
+| Integration tests | 117 assertions in a browser (`tools/e2e.html`) plus 21 service-layer flows in Node (`tools/test-flow.mjs`) |
 | Accessibility audit | clean, both themes, all nine routes |
 | Dependencies | 2, both vendored: Chart.js 4.5.1, jsPDF 3.0.1 |
 | Illustrations | 74 images, 0.96 MB, public domain, lazy-loaded |
 | Build step | none |
 
->>>>>>> c1ebcf1 (Session 6: warm-up / working / intensity sets, and Rish's load conventions)
 ---
 
 ## Running it
@@ -131,8 +128,10 @@ js/
     rest-timer.js          timestamp-based rest countdown
   engine/
     progression.js         double progression — pure, tested
-    set-model.js           warm-up / working / intensity split — pure, tested
+    set-model.js           warm-up / working / top / intensity split — pure, tested
     loading.js             what a logged number means — pure, tested
+    context.js             which machine a number came off — pure, tested
+    insights.js            reading the log, not plotting it — pure, tested
     one-rep-max.js         Epley estimate — pure, tested
     logs-service.js        recovery, measurements, photos
     photo-store.js         IndexedDB blob store for photos
@@ -148,7 +147,9 @@ components/                nav, ring, stat, toast, set-row, rest-bar, sheet,
                            chart-card, intensity-block, weight-entry
 data/workouts.json         the training program (replaceable)
 icons/                     PWA icons, generated from icon.svg
-tools/                     check.py, test.mjs, test-sets.mjs, test-migration.mjs,
+tools/                     check.py, check-imports.mjs, test.mjs, test-sets.mjs,
+                           test-pyramid.mjs, test-review.mjs, test-migration.mjs,
+                           test-flow.mjs, test-real-data.mjs,
                            e2e.html, preview.html, probe.html
 ```
 
@@ -233,14 +234,74 @@ Double progression, exactly as the source document specifies:
 - Movements marked `difficulty-first` (Ab Wheel Rollout) climb a difficulty
   ladder — control, then range, then a harder variation — and reach external
   resistance last, if ever.
+- Movements marked `maintain` (Pallof Press) hold their load and are never
+  progressed, never stalled and never deloaded on. They are quality work, and
+  putting them on a ladder turns a 45-second core exercise into a compound.
 - 4-week wave, then a deload week: sets cut ~40%, load at 60–70%.
 - A lift stalled for 3 sessions drops ~10% and rebuilds. Pain-limited sessions
-  are excluded from that count.
+  are excluded from that count, and so is any session on the far side of a load
+  scale change.
 
 **Only prescribed working sets are read by the engine.** Ramp-up sets, drop sets
 and failure sets are stored in separate arrays (`warmupSets`, `intensitySets`),
 so they cannot reach it — there is no filter to forget. See
 [the set model](#the-set-model).
+
+#### The load carried forward is the repeatable one
+
+The single most consequential rule in the engine, and the one that was wrong.
+
+The load the next session is built on is the **repeatable working load**, not
+the heaviest set of the day. Those are different numbers, and conflating them
+prescribed 72 kg on the flat dumbbell bench against repeatable working sets of
+55 kg: the 25 August session was logged `55×9 / 55×8 / 72×5`, the engine
+carried the heaviest completed set forward, and 72 became the target for all
+three sets of the following week — a load that had never been held twice.
+
+`repeatableLoad` reads it as the **lower median** of the completed working sets,
+which is the heaviest load at least half the sets were actually performed at:
+
+| Logged | Read as | Why |
+|---|---|---|
+| `55 / 55 / 55` | 55 | the ordinary case, unchanged |
+| `55 / 55 / 72` | 55 | two working sets and one probe |
+| `150 / 180 / 200 / 220` | 180 | a week-one ramp logged as working sets |
+| `45 / 55` | 45 | two loads, neither repeated — take the lower |
+
+The lower median rather than the upper, deliberately. Where the sets disagree,
+the load you can be sure of is the one you did *at least* half your sets at, and
+a prescription that is slightly too light costs one session of rep progress
+while one that is too heavy costs a month of grinding and a false stall.
+
+Rep targets follow the same rule: they are built only from the sets performed
+**at** that load. Five reps at 72 kg says nothing about what set three at 55 kg
+should be, so it is not allowed to set its target.
+
+A set can also be marked explicitly as a **top set**, which excludes it
+outright. The median is what protects the sessions nobody remembered to mark.
+
+#### A load is only compared with itself
+
+`engine/context.js`. A cable stack is not a unit of measurement: the log holds
+rope pushdowns at `9.1`, then `20`, then `50`, and low-to-high flies going `4.5`
+to `10` in a week. Those are different machines reading different numbers for
+the same effort, and comparing them turned a walk across the gym floor into a
+120% strength gain.
+
+So a load is only ever compared against another from the **same context** — the
+same machine, the same attachment. Two mechanisms, deliberately different:
+
+- **A declared tag is a fact.** Tag the machine while logging (pre-filled from
+  last time, so the usual case of using the same machine costs nothing) and the
+  app compares this week with the right week.
+- **A detected jump is a suspicion,** and is worded as one. For history that was
+  never tagged, a load moving further than any programmed increment can explain
+  is flagged rather than read as progress. The threshold is 1.35× with a 2 kg
+  floor, which sits in the empty space between the two populations in the real
+  log: a 30 lb pin becoming 35 lb is +17%, and a machine change is +120%.
+
+Nothing is ever converted between machines. The app labels the reading; it does
+not pretend to normalise it.
 
 These rules live as data in `progression` at the top of `workouts.json`, and
 are applied by `js/engine/progression.js` — a pure module with no imports,
@@ -260,8 +321,8 @@ silently misread a database that already holds real training, so read this first
 | Equipment | What gets typed in | What the app shows | Why |
 |---|---|---|---|
 | Barbell | the **plates only** — the bar is not included | `+40 kg plates`, with `est. total 60 kg` where the bar weight is known | It is what you load and what you read off the bar |
-| Dumbbell | the **total of both dumbbells** | `27.5 kg / hand` under a logged `55` | Per hand is what you pick off the rack |
-| Machine / cable | the **raw number on that machine** | exactly that number, `per side` where a movement uses two stacks | A 20 on one machine is not a 20 on the next one, and the app must not pretend otherwise |
+| Dumbbell | the **total of both dumbbells** | **both** figures, always: `27.5 kg / hand · 55 kg total (both)` | Per hand is what you pick off the rack, and a dumbbell number with no convention beside it is the one value in this app you cannot check by looking at it |
+| Machine / cable | the **raw number on that machine** | exactly that number, `per side` where a movement uses two stacks, with the machine tag beside it | A 20 on one machine is not a 20 on the next one, and the app must not pretend otherwise |
 | Bodyweight | **added load only**, blank or 0 for none | `Bodyweight`, or `+5 kg` | Body weight is tracked separately and would otherwise swamp every trend |
 
 Two consequences worth stating plainly:
@@ -272,6 +333,10 @@ Two consequences worth stating plainly:
 - **Dumbbell volume counts once.** An earlier build doubled it, on the assumption
   that the logged figure was per hand. Under this convention that counted every
   dumbbell set twice.
+- **Both dumbbell figures are always printed.** `36 kg / hand · 72 kg total
+  (both)`, never one of the two on its own, and the qualifier is `total (both)`
+  rather than a bare `total`. Every exercise card and history entry also carries
+  a one-line statement of what its stored numbers *are*.
 
 Storage is never rewritten to suit a display choice. Every one of these is applied
 on the read side, which is what makes changing one safe on a database that already
@@ -291,6 +356,11 @@ holds a month of training.
 | Push-ups count as volume | NO | Logged as reps, not as chest volume |
 | Pull-ups | PAIN-AWARE | Fewer pain-free reps, an early stop or a substitution are all valid |
 | Ab wheel | DIFFICULTY PROGRESSION | Reps → control → range → variation → load, in that order |
+| Pallof press | MAINTAINED | Two sets, a two-second hold, and no progression ladder |
+| Show both dumbbell figures | YES | `36 kg / hand · 72 kg total (both)`, never one alone |
+| Tag which machine | YES | Offered on cable and machine work, pre-filled from last time |
+| Flag impossible load jumps | YES | On untagged history, a jump no increment explains is flagged, never guessed at |
+| Any workout on any day | YES | The split is rolling; the app records planned and actual dates |
 
 All of them live in the `trainingPrefs` collection and are editable in
 Settings → Training preferences. None is hardcoded.
@@ -316,9 +386,23 @@ entry = {
   intensitySets: [ { id, type: 'drop'|'failure', note, stages: [...] } ],
   pain:          null | { score, location, note, action, alternativeId },
   difficulty:    null | 'standard' | 'slow-eccentric' | ... ,
+  context:       null | { machineId, label, attachment, note },
+  substitution:  null | { performedId, label, comparableLoad, note },
   notes,
 }
 ```
+
+`sets` holds two kinds of set, not one. Most are `working`. One may be `top`: a
+heavier probe taken above the working load, which stays **in place** in the
+array — a top set is a working set that happened to be heavier, and moving it
+would rewrite the order the session was performed in. It counts everywhere
+except in the one place that matters, which is the load the next session is
+built on.
+
+`context` records which machine the numbers came off; `substitution` records
+that a different movement was performed in a planned slot. Both feed one
+comparison key (`engine/context.contextKey`), so the engine needs to know about
+neither individually.
 
 **Why separate arrays rather than a `kind` tag on one list.** Seven modules read
 `entry.sets` — the progression engine, the PR detector, the CSV export, the
@@ -332,6 +416,34 @@ be asked for by name.
 A drop-set sequence is **one** piece of intensity work with several stages, and is
 reported that way: *"3 working sets + 1 drop-set sequence"*, never as six sets.
 
+### Substitutions
+
+A bar triceps pushdown where the program says rope is **performed work in a
+planned slot**, not a skipped exercise. `entry.exerciseId` stays pointing at the
+planned movement — that is what keeps the session's completion, its day, its
+volume and its adherence attached to the program, and it means clearing the
+substitution later restores the original reading exactly. The performed movement
+is named in `substitution.performedId` and keeps its own load series, because
+two attachments on one stack are two scales.
+
+`workouts.json` declares which stand-ins are acceptable for which movements and
+whether their loads may be compared (the default is no). An unlisted
+substitution is refused rather than invented, and the program fails to load if a
+declared substitution has no definition to resolve to.
+
+### Any day's workout, on any day
+
+A session records the workout it *was* (`dayId`) and the day it *happened*
+(`date`). Everything about being early, late or on time is derived from those
+two, so "Tuesday Chest, performed on Wednesday, 1 day late" is a first-class
+outcome rather than a missed session plus a mystery — and every session logged
+before the idea existed gets its reading for free.
+
+The week counts a moved session as **done**, reports how many were moved, and
+lists what is still outstanding. The program's own missed-day rules describe the
+split as rolling rather than calendar-locked, so this matches the plan rather
+than bending it.
+
 ### Pain-aware logging
 
 Optional and non-diagnostic. It records a 0–10 number, a location, what you
@@ -342,9 +454,31 @@ never reads as getting weaker. The session itself is untouched and still appears
 in history, reports and the CSV. The app states that it is not a diagnosis and
 points at a professional; it does not offer an opinion of its own.
 
-### Migration: schema v1 → v2
+### Migrations
 
-Run once, at boot, by `js/services/db.js`. **Strictly additive.**
+Run once each, at boot, by `js/services/db.js`. **All of them strictly
+additive**, and every one of them refuses to guess.
+
+| From | To | What it does |
+|---|---|---|
+| v1 | v2 | Splits warm-up, working and intensity work into separate arrays |
+| v2 | v3 | Points week one's mislogged back squats at the hack squat that was actually trained |
+| v3 | v4 | Gives every entry `context: null` and `substitution: null` |
+
+**v3 → v4 guesses nothing, and that is a decision rather than an omission.** It
+would have been easy to walk the rope pushdown's `9.1 → 20 → 50` series, find
+the jumps, and stamp "machine A" and "machine B" on either side of each one.
+That would be an invention: the app does not know which machine any of those
+numbers came off, whether the 20 and the 50 were the same stack on different
+pins, or whether one of the jumps was a genuine and hard-won increase. A tag is
+a statement of fact by the user, and manufacturing one and then presenting it
+back to them as their own record is worse than having none. So the field is left
+empty and the *engine* handles the untagged history — flagging, declining to
+read it as strength, and saying so in words that ask rather than assert.
+
+#### Migration: schema v1 → v2
+
+**Strictly additive.**
 
 1. **A parachute first.** The entire v1 database is copied verbatim to a reserved
    `__premigration` key before anything is touched, and is downloadable from
@@ -367,32 +501,131 @@ History → session detail offers **Classify these sets** for whenever you want 
 tell the app what they actually were, one deliberate decision per set.
 
 `tools/test-migration.mjs` asserts all of the above, and runs against the real
-exported backup when one is present in the repo root.
+exported backup when one is present in the repo root. It asserts
+*losslessness* rather than a version number, so a future schema bump does not
+break seven passing tests while saying nothing about whether any data was lost.
+
+---
+
+## Reading the log
+
+`js/engine/insights.js`, and the section of Progress that renders it. The
+distinction it exists for: the app could already *plot* a training log, which
+answers "what did I do" and leaves "am I getting stronger, and where" to the
+reader. This layer answers the second question.
+
+Three rules govern every figure in it, and they are why the numbers can be
+trusted rather than merely displayed.
+
+1. **Measure the repeatable load, not the heaviest set.** A probe is not a
+   working weight.
+2. **Never compare across a scale change.** Every trend is measured over a
+   *comparable run* — the newest stretch of sessions whose loads mean the same
+   thing — and each reading says how long that run was. The gap between an
+   exercise's session count and its comparable-session count is the honest
+   answer to "how much of my history can actually be read".
+3. **Say when there is not enough data.** Four sessions is four sessions. A
+   slope fitted to three points with an r² of 0.2 is a decoration, so
+   `confidence` and the r² are both reported and the UI defers to them.
+
+Every exercise lands in exactly one pile:
+
+| Status | Means |
+|---|---|
+| **Progressing** | Estimated strength up, or more reps at the same load |
+| **Holding** | Flat, but not for long enough to call it a stall |
+| **Losing reps** | The load holds or climbs while the reps underneath it fall away |
+| **Stalled** | No load or rep gain across two comparable sessions |
+| **Load scale changed** | A different machine, or a jump no increment explains |
+| **Maintained** | Held by design, never progressed and never stalled |
+| **Too new to read** | One comparable session so far |
+
+**Losing reps** is the status the module was written for. It is the case a
+volume chart reads as flat and a top-set chart reads as progress, and it is
+neither. It requires *three* comparable sessions, because the session after a
+load increase is supposed to come in at the bottom of the rep range — hip
+thrusts going 80 kg for 11/11/10 and then 85 kg for 8/8/8 is double progression
+working exactly as designed, and flagging it would be the app telling the user
+off for following its own prescription.
+
+Estimated 1RM is the **mean across the sets performed at the working load**, not
+the best set of the day. Leg extensions went `12/11/11` one week and `13/10/8`
+the next: the best set improved, the session got materially worse, and a
+max-based series calls that progress. The Progress dashboard and the two-week
+review read the same figure, so they cannot disagree about the same fortnight.
+
+Everything else on the page is built from the same readings: **load or reps**
+(counted in exercises, because a mean of a squat's percentage and a lateral
+raise's percentage refers to nothing), **plan against performance**, **by muscle
+group** (a median, since one outlier would otherwise decide a three-exercise
+group), **the wave** grouped by wave week rather than calendar week, and
+**after the deload**, which is the only figure in the app that checks whether
+giving up a training week actually bought anything.
 
 ---
 
 ## Checking your work
 
 ```bash
-python tools/check.py     # parses every module; resolves every import,
-                          # including dynamic ones, plus HTML and precache refs
-node --test tools/test.mjs tools/test-sets.mjs tools/test-migration.mjs              tools/test-pyramid.mjs tools/test-review.mjs
-                          # 121 assertions over progression, the set model,
-                          # load conventions, the v1 to v2 migration, analytics,
-                          # 1RM and the review engine.
-                          # `node --test tools/` does not expand a directory on
-                          # Windows, so the files are named explicitly.
+python tools/check.py            # parses every module; resolves every import,
+                                 # including dynamic ones, plus HTML and
+                                 # precache refs
+node tools/check-imports.mjs     # resolves every *named* import against the
+                                 # file it names — the one class of mistake a
+                                 # no-build ES-module app is uniquely exposed
+                                 # to. Also reports dead imports.
+node --test tools/test.mjs tools/test-sets.mjs tools/test-migration.mjs \
+           tools/test-pyramid.mjs tools/test-review.mjs \
+           tools/test-flow.mjs tools/test-real-data.mjs
+                                 # 207 assertions over progression, the set
+                                 # model, load conventions, machine context,
+                                 # the insights engine, every migration,
+                                 # analytics, 1RM, the review engine, the full
+                                 # service layer, and the real training log.
+                                 # `node --test tools/` does not expand a
+                                 # directory on Windows, so the files are
+                                 # named explicitly.
 ```
+
+Two of those run against **real data** rather than fixtures, which is
+deliberate: every bug the 1.9.0 release fixed was invisible in a fixture and
+obvious in the log.
+
+- `tools/test-real-data.mjs` drives the engine over `ironlog-backup-*.json`. Its
+  assertions are about shape and sanity, not figures the next session would
+  change: no prescription may exceed what was actually repeated by more than one
+  increment, no machine change may be reported as strength, every rep target
+  must sit inside its exercise's range.
+- `tools/test-flow.mjs` drives the real *services* end to end in Node, with the
+  in-memory storage adapter and `fetch` stubbed to read the program from disk.
+  It covers starting sessions, logging sets, tagging machines, substituting
+  movements, moving a workout to another day, and a backup round trip that has
+  to produce the identical recommendation afterwards.
+
+Both skip cleanly when no backup file is present.
 
 Then, over HTTP, in a **throwaway browser profile** (these clear Local Storage
 on the origin they run against):
 
 | Page | What it proves |
 |---|---|
-| `tools/e2e.html` | 117 service-layer assertions against real Local Storage: multi-session progression, the deload wave, PR detection, resume guards, set editing, the warm-up/working/intensity split, pain-aware pull-ups, ab-wheel difficulty progression, load conventions, CSV escaping, a real multi-page PDF, backup round trip |
-| `tools/audit.html` | accessible names, alt text, labels, duplicate ids, 44px targets, WCAG AA contrast, overflow and heading order — across all nine routes. `?theme=light` for the light palette |
+| `tools/smoke.html` | Every route **renders** against the real backup, mid-workout, on a single session, and on an empty database — plus that `index.html` itself boots. Reports any thrown error, unhandled rejection or `console.error`. This is the cheap one to run first: rendering a page module is not the same as it working, and a page that references a function which no longer exists fails only at runtime |
+| `tools/e2e.html` | 121 service-layer assertions against real Local Storage: multi-session progression, the deload wave, PR detection, resume guards, set editing, the warm-up/working/intensity split, pain-aware pull-ups, ab-wheel difficulty progression, load conventions, CSV escaping, a real multi-page PDF, backup round trip |
+| `tools/probe.html` | Nothing overflows a 402px viewport, on every route, with real history behind it. `?open=1` adds the Workout page mid-session, which is the tightest layout in the app |
+| `tools/audit.html` | accessible names, alt text, labels, duplicate ids, 44px targets, WCAG AA contrast, overflow and heading order — across all nine routes. `?theme=light` for the light palette. Needs a profile with data in it, so load a page that restores a backup first |
 | `tools/perf.html` | shell payload, and that the vendored libraries are not fetched on routes that do not need them |
 | `tools/pdf-dump.html` | emits a generated report as base64 so the PDF can be pulled out and actually looked at |
+
+Two notes on running these headless, both learned the hard way:
+
+- **Use a fresh `--user-data-dir` each time.** A profile that has loaded the app
+  once holds a service worker, and it will serve a cached copy of the build you
+  were debugging rather than the one you just changed.
+- **Do not wait on a timer.** Under `--virtual-time-budget` a `setTimeout` fires
+  immediately while modules are still loading. `probe.html` used to poll on a
+  timer, measured an unbooted document, and reported "layout fits" — a pass
+  that meant nothing. Wait on a flag the app itself sets, or render the page
+  module synchronously.
 
 `tools/preview.html` renders the app at phone, iPad and desktop widths side by
 side — the fastest way to catch a mobile layout regression. `?theme=light`
@@ -400,15 +633,16 @@ switches palette, `?route=workout` switches page, and `?seed=logging` fabricates
 a training history and leaves a session open so the logging UI can be reviewed
 without lifting anything (it also clears Local Storage).
 
-`tools/probe.html` reports any element wider than a phone viewport, which is
-the failure mode that a desktop browser window will never show you.
+`tools/preview.html` and `tools/probe.html` cover the two things a desktop
+browser window will never show you: how the layout reads at phone width, and
+whether anything overflows it.
 
 ---
 
 ## Data and privacy
 
 Everything lives in this device's Local Storage under the `ironlog:v1:` key
-prefix, at **schema version 2**. There is no account, no server, no analytics,
+prefix, at **schema version 4**. There is no account, no server, no analytics,
 and no network request after the first load.
 
 That also means **this device is the only copy.** Settings → Back up to JSON

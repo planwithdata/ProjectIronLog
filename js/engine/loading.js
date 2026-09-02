@@ -167,6 +167,8 @@ export function incrementScale(exercise, prefs = DEFAULT_LOAD_PREFS) {
  *   secondaryKg: number|null,
  *   secondaryQualifier: string,
  *   storedKg: number|null,
+ *   perHandKg: number|null,   // dumbbell pairs only
+ *   totalKg: number|null,     // dumbbell pairs only
  * }}
  */
 export function describeLoad(exercise, weightKg, prefs = DEFAULT_LOAD_PREFS) {
@@ -185,20 +187,36 @@ export function describeLoad(exercise, weightKg, prefs = DEFAULT_LOAD_PREFS) {
     secondaryKg: null,
     secondaryQualifier: '',
     storedKg: stored,
+    perHandKg: null,
+    totalKg: null,
   };
 
   switch (entry) {
     case LOAD_ENTRY.TOTAL_BOTH: {
       if (stored === null) return base;
+      // Both figures, always, whichever way round the preference puts them.
+      // A dumbbell number that does not say which of the two it is is the one
+      // ambiguity in this app that cannot be resolved by looking at it: 36 and
+      // 72 are the same pair of dumbbells, and a progression chart that mixes
+      // the two conventions is unreadable rather than merely wrong.
       if (merged.dumbbellDisplay === 'total') {
-        return { ...base, qualifier: 'total', secondaryKg: half(stored), secondaryQualifier: '/ hand' };
+        return {
+          ...base,
+          qualifier: 'total (both)',
+          secondaryKg: half(stored),
+          secondaryQualifier: '/ hand',
+          perHandKg: half(stored),
+          totalKg: stored,
+        };
       }
       return {
         ...base,
         displayKg: half(stored),
         qualifier: '/ hand',
         secondaryKg: stored,
-        secondaryQualifier: 'total',
+        secondaryQualifier: 'total (both)',
+        perHandKg: half(stored),
+        totalKg: stored,
       };
     }
 
@@ -245,6 +263,68 @@ export function describeLoad(exercise, weightKg, prefs = DEFAULT_LOAD_PREFS) {
  */
 export function actionableLoadKg(exercise, weightKg, prefs = DEFAULT_LOAD_PREFS) {
   return describeLoad(exercise, weightKg, prefs).displayKg;
+}
+
+/**
+ * One line stating what this exercise's stored numbers *are*, in the words the
+ * equipment uses.
+ *
+ * Shown on the exercise card and above every load column in history, because
+ * the brief's third point is exactly this: a column of dumbbell numbers is
+ * misleading unless the column says which convention it holds. There is no
+ * clever inference here and no conversion — it is a label, and its whole value
+ * is that it is always present.
+ */
+export function loadBasisLabel(exercise, prefs = DEFAULT_LOAD_PREFS) {
+  const merged = { ...DEFAULT_LOAD_PREFS, ...prefs };
+
+  switch (loadEntryFor(exercise)) {
+    case LOAD_ENTRY.TOTAL_BOTH:
+      return merged.dumbbellDisplay === 'total'
+        ? 'Total of both dumbbells — half of it is in each hand'
+        : 'Per hand — one dumbbell, with the total of both alongside';
+    case LOAD_ENTRY.PLATES: {
+      const bar = barWeightKg(exercise);
+      return bar === null
+        ? 'Added plates only — the bar is not included'
+        : `Added plates only — add the ${round2(bar)} kg bar for the total`;
+    }
+    case LOAD_ENTRY.BODYWEIGHT:
+      return 'Added load only — body weight is tracked separately';
+    default:
+      return isPerSideMachine(exercise)
+        ? 'The reading on this machine, set on each side — not comparable between machines'
+        : 'The reading on this machine — not comparable between machines';
+  }
+}
+
+/**
+ * A two-word tag for the same thing, for places with no room for a sentence:
+ * a table header, a chart axis, a pill.
+ */
+export function loadBasisTag(exercise, prefs = DEFAULT_LOAD_PREFS) {
+  const merged = { ...DEFAULT_LOAD_PREFS, ...prefs };
+
+  switch (loadEntryFor(exercise)) {
+    case LOAD_ENTRY.TOTAL_BOTH:
+      return merged.dumbbellDisplay === 'total' ? 'total of both' : 'per hand';
+    case LOAD_ENTRY.PLATES:      return 'plates only';
+    case LOAD_ENTRY.BODYWEIGHT:  return 'added load';
+    default:                     return isPerSideMachine(exercise) ? 'per side' : 'machine reading';
+  }
+}
+
+/**
+ * Both readings of one dumbbell load, for a caller that wants to print them
+ * together without re-deriving the halving rule. Null for anything that is not
+ * a dumbbell pair.
+ */
+export function dumbbellPair(exercise, weightKg) {
+  if (!isPairedLoad(exercise)) return null;
+  if (weightKg === null || weightKg === undefined || weightKg === '') return null;
+  const total = Number(weightKg);
+  if (!Number.isFinite(total)) return null;
+  return { perHandKg: half(total), totalKg: round2(total) };
 }
 
 /** Bar weight for a barbell movement, or null when it is not configured. */

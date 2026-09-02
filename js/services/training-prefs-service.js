@@ -146,11 +146,47 @@ export const PREFERENCES = [
   },
   {
     group: 'Load conventions',
+    key: 'dumbbellShowBoth',
+    label: 'Always show both dumbbell figures',
+    help: 'Prints "36 kg / hand · 72 kg total" rather than one number that could be either. '
+      + 'On, because a dumbbell figure with no convention beside it is the one number in this '
+      + 'app you cannot check by looking at it.',
+    type: 'toggle',
+  },
+  {
+    group: 'Load conventions',
     key: 'machineLoadHandling',
     label: 'Machine and cable loads',
     help: 'Raw: the number on that machine, never normalised against another machine.',
     type: 'readonly',
     display: 'Raw machine value',
+  },
+  {
+    group: 'Machines and cables',
+    key: 'trackMachineContext',
+    label: 'Tag which machine',
+    help: 'Offers a machine and attachment tag on cable and machine movements, pre-filled from '
+      + 'last time. Loads are then compared only within one machine, because 4.5 on one stack '
+      + 'and 10 on the next can be the same effort.',
+    type: 'toggle',
+  },
+  {
+    group: 'Machines and cables',
+    key: 'flagLoadDiscontinuities',
+    label: 'Flag impossible load jumps',
+    help: 'On untagged history, a load that moves further than any programmed increment could '
+      + 'explain is flagged rather than read as a strength change. It never alters a stored '
+      + 'number and never guesses which machine it was.',
+    type: 'toggle',
+  },
+  {
+    group: 'Schedule',
+    key: 'allowAnyDayWorkout',
+    label: 'Any workout on any day',
+    help: 'Start any day\'s workout whenever you like. The app records which day it was '
+      + 'scheduled for and which day it was done, so a missed Tuesday can be trained on '
+      + 'Wednesday without the split losing its shape.',
+    type: 'toggle',
   },
 ];
 
@@ -228,4 +264,24 @@ export function warmupSetCount(fallback = 3) {
   const value = Number(getPrefs().defaultWarmupSets);
   if (!Number.isFinite(value)) return fallback;
   return Math.min(4, Math.max(1, Math.round(value)));
+}
+
+/** Should the machine/attachment tag be offered while logging? */
+export function machineContextEnabled() {
+  return getPrefs().trackMachineContext !== false;
+}
+
+/** Should an unexplained load jump be flagged rather than read as progress? */
+export function discontinuityFlagsEnabled() {
+  return getPrefs().flagLoadDiscontinuities !== false;
+}
+
+/** May any day's workout be started today? */
+export function anyDayWorkoutEnabled() {
+  return getPrefs().allowAnyDayWorkout !== false;
+}
+
+/** Should both readings of a dumbbell load always be printed? */
+export function showBothDumbbellFigures() {
+  return getPrefs().dumbbellShowBoth !== false;
 }

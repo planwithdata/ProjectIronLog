@@ -2,81 +2,246 @@
 <!--
   tools/probe.html — Layout diagnostic.
 
-  Loads the app in a phone-width iframe, waits for boot, then reports which
-  elements are wider than the viewport. Read the result with:
+  Renders every route at a phone width and reports which elements are wider
+  than the viewport. Overflow on a phone is the single most common way a
+  mobile-first layout breaks, and it is invisible in a desktop window. This
+  makes it measurable.
 
-    chrome --headless=new --virtual-time-budget=9000 \
+    chrome --headless=new --virtual-time-budget=40000 \
            --dump-dom http://127.0.0.1:PORT/tools/probe.html
 
-  Overflow on a phone is the single most common way a mobile-first layout
-  breaks, and it is invisible in a desktop window. This makes it measurable.
+  Parameters:
+
+    ?route=progress   probe one route (default: all of them)
+    ?width=402        container width in CSS pixels (default 402 — an iPhone
+                      15's 393pt plus a little, so a pass here passes on a
+                      phone)
+    ?seed=none        skip seeding (default: restore ironlog-backup-*.json)
+    ?open=1           also probe the Workout page mid-session, with a top set,
+                      a machine tag and a substitution live
+
+  Two things about how it works are deliberate.
+
+  **It renders the page modules directly into a container that reproduces the
+  app shell, rather than loading `index.html` in an iframe.** The iframe version
+  of this tool did not work: under `--virtual-time-budget` the harness's polling
+  timers fire instantly while the app's module graph is still loading, so it
+  measured an unbooted document and reported "layout fits" — a pass that meant
+  nothing. Rendering the module directly is synchronous and cannot race. The
+  container below carries the same `.app` / `.app-main` / `.page` chain and the
+  same tokens, so `--gutter`, `--page-max` and the safe-area insets all apply.
+
+  **It seeds real training history first.** An empty database renders
+  empty-state cards, which are short, centred and fit trivially — so an
+  unseeded probe passes on exactly the pages most likely to overflow. With a
+  real log behind it, Progress renders three dozen exercise rows with full
+  sentences in them, and that is the layout worth measuring.
+
+  It writes to Local Storage on this origin, so run it against a throwaway
+  profile — never against a browser holding real training data.
 -->
-<html>
-<head><meta charset="utf-8"><title>probe</title></head>
-<body style="margin:0;font:12px monospace;background:#fff;color:#000">
+<html data-theme="dark">
+<head>
+  <meta charset="utf-8"><title>probe</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/components.css">
+  <link rel="stylesheet" href="../css/workout.css">
+  <link rel="stylesheet" href="../css/charts.css">
+  <link rel="stylesheet" href="../css/reports.css">
+  <style>
+    /* The stage reproduces the shell's layout chain at a fixed width. Height
+       and overflow are released so nothing is clipped out of measurement — a
+       scrolled-away element that overflows still overflows. */
+    #stage { width: var(--probe-width, 402px); }
+    #stage .app { height: auto; overflow: visible; }
+    #stage .app-main { overflow: visible; }
+    #out {
+      font: 12px/1.5 ui-monospace, monospace;
+      color: #ffd479;
+      background: #000;
+      padding: 12px;
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body style="margin:0;background:#000">
   <pre id="out">measuring…</pre>
-  <iframe id="frame" src="../index.html#/home"
-          style="width:402px;height:900px;border:0"></iframe>
+  <div id="stage" aria-hidden="true">
+    <div class="app"><div class="app-shell"><main class="app-main" id="outlet"></main></div></div>
+  </div>
 
-  <script>
-    const WIDTH = 402;
+  <script type="module">
+    const params = new URLSearchParams(location.search);
+    const WIDTH = Number(params.get('width')) || 402;
+    const ROUTES = params.get('route')
+      ? [params.get('route')]
+      : ['home', 'workout', 'progress', 'history', 'logs', 'notes', 'photos', 'reports', 'settings'];
 
-    function report(lines) {
-      document.getElementById('out').textContent = lines.join('\n');
+    document.getElementById('stage').style.setProperty('--probe-width', `${WIDTH}px`);
+
+    const out = document.getElementById('out');
+    const outlet = document.getElementById('outlet');
+    const lines = [];
+    let overflowCount = 0;
+    let renderFailures = 0;
+
+    const flush = () => { out.textContent = lines.join('\n'); };
+
+    /* --- Seed ----------------------------------------------------------- */
+
+    const db = await import('../js/services/db.js');
+    const programService = await import('../js/services/program-service.js');
+    const sessionService = await import('../js/services/session-service.js');
+
+    await db.init();
+    await programService.load();
+
+    if (params.get('seed') !== 'none') {
+      let restored = null;
+      for (const name of ['ironlog-backup-2026-09-02.json', 'ironlog-backup-2026-08-12.json']) {
+        try {
+          const response = await fetch(`../${name}`, { cache: 'no-cache' });
+          if (response.ok) { await db.importAll(await response.json()); restored = name; break; }
+        } catch { /* not served */ }
+      }
+      lines.push(restored
+        ? `seeded from ${restored} — ${db.read('sessions').length} sessions`
+        : 'no backup served; measuring against an empty database');
+    } else {
+      lines.push('seeding skipped (?seed=none)');
     }
 
-    setTimeout(() => {
-      const frame = document.getElementById('frame');
-      const doc = frame.contentDocument;
-      if (!doc) return report(['ERROR: no iframe document']);
+    lines.push(`width=${WIDTH}`, '');
+    flush();
 
-      const lines = [];
-      const html = doc.documentElement;
-      const body = doc.body;
+    /* --- Measure -------------------------------------------------------- */
 
-      lines.push(`booted=${html.dataset.booted || 'false'}`);
-      lines.push(`viewport=${WIDTH}`);
-      lines.push(`html.scrollWidth=${html.scrollWidth} body.scrollWidth=${body.scrollWidth}`);
-
-      const main = doc.querySelector('.app-main');
-      if (main) lines.push(`main.scrollWidth=${main.scrollWidth} main.clientWidth=${main.clientWidth}`);
-
-      const page = doc.querySelector('.page');
-      if (page) {
-        const rect = page.getBoundingClientRect();
-        lines.push(`page width=${rect.width.toFixed(1)} scrollWidth=${page.scrollWidth}`);
-      }
-
-      // Every element whose right edge lands beyond the viewport.
-      lines.push('', 'OVERFLOWING ELEMENTS (right edge > viewport):');
-      let found = 0;
-      for (const node of doc.querySelectorAll('*')) {
+    /**
+     * Elements whose right edge lands beyond the container.
+     *
+     * An element that scrolls its own overflow is doing the right thing: a wide
+     * table, a chart, or the weekday strip inside `overflow-x: auto` is the
+     * documented relief rather than a bug. Only overflow with nowhere to go
+     * reaches the page, so the ancestor chain is checked before reporting.
+     */
+    function overflowing() {
+      const found = [];
+      for (const node of outlet.querySelectorAll('.page *')) {
         const rect = node.getBoundingClientRect();
         if (rect.width === 0) continue;
         if (rect.right <= WIDTH + 0.5) continue;
-        found += 1;
-        if (found > 25) continue;
-        const cls = node.className && typeof node.className === 'string'
-          ? '.' + node.className.trim().split(/\s+/).join('.')
+
+        let scrollable = false;
+        for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+          const overflowX = getComputedStyle(parent).overflowX;
+          if (overflowX === 'auto' || overflowX === 'scroll') { scrollable = true; break; }
+          if (parent.classList.contains('page')) break;
+        }
+        if (scrollable) continue;
+
+        const cls = typeof node.className === 'string' && node.className.trim()
+          ? `.${node.className.trim().split(/\s+/).join('.')}`
           : '';
-        const text = (node.textContent || '').trim().slice(0, 28).replace(/\s+/g, ' ');
-        lines.push(
-          `${node.tagName.toLowerCase()}${cls}` +
-          ` | left=${rect.left.toFixed(0)} right=${rect.right.toFixed(0)} w=${rect.width.toFixed(0)}` +
-          ` | "${text}"`
+        found.push(
+          `     ${node.tagName.toLowerCase()}${cls}`
+          + ` right=${rect.right.toFixed(0)} w=${rect.width.toFixed(0)}`
+          + ` "${(node.textContent || '').trim().slice(0, 34).replace(/\s+/g, ' ')}"`
         );
       }
-      if (!found) lines.push('none — layout fits');
+      return found;
+    }
 
-      // Computed values of the layout-critical tokens.
-      lines.push('', 'TOKENS:');
-      const styles = frame.contentWindow.getComputedStyle(html);
-      for (const token of ['--gutter', '--safe-left', '--safe-right', '--page-max', '--tabbar-h']) {
-        lines.push(`${token} = "${styles.getPropertyValue(token).trim()}"`);
+    async function probe(name, module, pageParams = {}) {
+      outlet.replaceChildren();
+
+      let nodes = 0;
+      let teardown = null;
+      try {
+        const page = await import(module);
+        outlet.append(page.render(pageParams));
+        if (typeof page.mount === 'function') teardown = page.mount();
+        nodes = outlet.querySelectorAll('*').length;
+      } catch (error) {
+        renderFailures += 1;
+        lines.push(`  FAIL ${name} — render threw: ${error.message}`);
+        flush();
+        return;
       }
 
-      report(lines);
-    }, 2500);
+      // Charts mount asynchronously and change what there is to measure.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // A route that renders essentially nothing has failed even if it did not
+      // throw — but an empty-state card is legitimately small, so the floor is
+      // "more than an empty div".
+      if (nodes < 5) {
+        renderFailures += 1;
+        lines.push(`  FAIL ${name} — rendered ${nodes} nodes`);
+      } else {
+        const offenders = overflowing();
+        overflowCount += offenders.length;
+        lines.push(offenders.length
+          ? `  FAIL ${name} — ${offenders.length} overflowing (${nodes} nodes)`
+          : `  ok   ${name} — fits (${nodes} nodes)`);
+        lines.push(...offenders.slice(0, 10));
+        if (offenders.length > 10) lines.push(`     … and ${offenders.length - 10} more`);
+      }
+
+      try { if (typeof teardown === 'function') teardown(); } catch { /* reported below */ }
+      outlet.replaceChildren();
+      flush();
+    }
+
+    for (const route of ROUTES) {
+      await probe(route, `../js/pages/${route}.js`);
+    }
+
+    /* One session's detail view is its own branch of History. */
+    const latest = sessionService.getCompletedSessions()[0];
+    if (latest) {
+      await probe('history (detail)', '../js/pages/history.js', { id: latest.id });
+    }
+
+    /* Mid-workout is where the newest controls live, and the set row is the
+       tightest layout in the app — a seventh column in it once squeezed the
+       weight field to four pixels wide. */
+    if (params.get('open') === '1' && latest) {
+      const day = programService.getDayById('tuesday-chest') ?? programService.getTrainingDays()[0];
+      const session = await sessionService.startSession(day.id);
+      const first = session.entries.find((entry) => entry.sets.length > 0);
+      if (first) {
+        await sessionService.updateSet(session.id, first.exerciseId, 0,
+          { weightKg: 55, reps: 9, completed: true });
+        await sessionService.setTopSet(session.id, first.exerciseId, 0, true);
+      }
+      const cable = session.entries.find((entry) => entry.exerciseId === 'rope-triceps-pushdown');
+      if (cable) {
+        await sessionService.setEntryContext(session.id, cable.exerciseId,
+          { label: 'Corner stack', attachment: 'rope' });
+        await sessionService.substituteEntry(session.id, cable.exerciseId, 'bar-triceps-pushdown');
+      }
+      await probe('workout (logging)', '../js/pages/workout.js');
+      await sessionService.abandonSession(session.id);
+    }
+
+    /* --- Report --------------------------------------------------------- */
+
+    lines.push('', 'TOKENS:');
+    const styles = getComputedStyle(document.documentElement);
+    for (const token of ['--gutter', '--safe-left', '--safe-right', '--page-max', '--tabbar-h']) {
+      lines.push(`  ${token} = "${styles.getPropertyValue(token).trim()}"`);
+    }
+
+    const failed = overflowCount + renderFailures;
+    lines.unshift(failed === 0
+      ? `PASS — every route fits ${WIDTH}px`
+      : `FAIL — ${overflowCount} overflowing element(s), ${renderFailures} render failure(s)`);
+    flush();
+    document.title = failed === 0 ? 'PASS' : 'FAIL';
   </script>
 </body>
 </html>

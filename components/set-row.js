@@ -28,7 +28,7 @@ import { trimNumber, displayWeight, storeWeight } from '../js/core/format.js';
  * @param {string} options.units            'kg' | 'lb' for display
  * @param {boolean} options.showRpe
  * @param {boolean} options.perSide         reps are per side
- * @param {string} [options.variant]        'working' | 'warmup' | 'drop'
+ * @param {string} [options.variant]        'working' | 'top' | 'warmup' | 'drop'
  * @param {string} [options.indexLabel]     overrides the set number ("W1", "D2")
  * @param {boolean} [options.showWeight]    false for movements logged as reps only
  * @param {(weightKg: number|null) => string|null} [options.captionFor]
@@ -37,6 +37,9 @@ import { trimNumber, displayWeight, storeWeight } from '../js/core/format.js';
  *        the caption is to confirm that the number you typed means what you
  *        think it means.
  * @param {Node} [options.extra]            appended after the RPE control
+ * @param {boolean} [options.isTop]         this set is a heavier probe
+ * @param {(() => void)|null} [options.onToggleTop]
+ *        Mark or unmark the set as a heavier top set. Null hides the control.
  * @param {(patch: object) => void} options.onChange
  * @param {() => void} [options.onRemove]
  */
@@ -53,6 +56,8 @@ export function setRow({
   showWeight = true,
   captionFor = null,
   extra = null,
+  isTop = false,
+  onToggleTop = null,
   onChange,
   onRemove = null,
 }) {
@@ -144,6 +149,39 @@ export function setRow({
       ])
     : null;
 
+  /* --- Top-set marker --------------------------------------------------
+     Decided in the moment — you find out a set was a probe by doing it — so it
+     has to be reachable from the row rather than from a menu.
+
+     It goes in the caption row *beneath* the controls, not in the control row,
+     for two reasons. The control row is a six-column grid already at the limit
+     of a 390px phone: adding a seventh column squeezed the weight field to
+     four pixels wide, which is how this was found. And the caption row has
+     room for a *label*, so the control reads "Top set" rather than being a
+     bare glyph nobody would guess the meaning of.
+
+     Deliberately far from the checkmark either way: mis-tapping it would
+     relabel the session's working load, which is the one thing in this row
+     with consequences past today.
+     ================================================================== */
+
+  const topToggle = onToggleTop
+    ? el(`button.set-row__top${isTop ? '.set-row__top--on' : ''}`, {
+        type: 'button',
+        'aria-pressed': isTop ? 'true' : 'false',
+        'aria-label': isTop
+          ? `Set ${index + 1}: unmark as a heavier top set`
+          : `Set ${index + 1}: mark as a heavier top set`,
+        title: isTop
+          ? 'A heavier probe. Kept out of the load the next session is built on.'
+          : 'Heavier than your working sets? Mark it so it does not become next week\'s target.',
+        on: { click: () => onToggleTop() },
+      }, [
+        el('span', { text: '▲', 'aria-hidden': 'true' }),
+        el('span', { text: isTop ? 'Top set' : 'Top set?' }),
+      ])
+    : null;
+
   /* --- Derived load caption -------------------------------------------- */
 
   const caption = captionFor
@@ -166,6 +204,7 @@ export function setRow({
   const classes = ['set-row'];
   if (isDone) classes.push('set-row--done');
   if (variant && variant !== 'working') classes.push(`set-row--${variant}`);
+  if (isTop) classes.push('set-row--top');
 
   const row = el(`div.${classes.join('.')}`, {
     dataset: { setIndex: String(index), variant },
@@ -190,11 +229,15 @@ export function setRow({
   // would be four more targets competing with the checkmark.
   if (onRemove) attachLongPress(row.querySelector('.set-row__index'), onRemove);
 
-  if (!caption) return row;
+  if (!caption && !topToggle) return row;
 
-  // The caption sits beneath the controls rather than inside them: the row is
-  // already at the limit of what fits across a phone.
-  return el('div.set-row-group', {}, [row, el('div.set-row__captions', {}, [caption])]);
+  // The caption and the top-set toggle sit beneath the controls rather than
+  // inside them: the control row is already at the limit of what fits across a
+  // phone, and putting anything else in it costs the weight field its width.
+  return el('div.set-row-group', {}, [
+    row,
+    el('div.set-row__captions', {}, [topToggle, caption].filter(Boolean)),
+  ]);
 }
 
 /* --- Building blocks ---------------------------------------------------- */

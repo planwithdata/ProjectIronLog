@@ -22,7 +22,7 @@ import { EVENTS, emit } from '../core/events.js';
 import { SET_KIND } from '../engine/set-model.js';
 
 /** Current schema version. Bump when a migration is added below. */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /**
  * Reserved storage key holding a verbatim copy of the database as it was
@@ -128,6 +128,27 @@ export function defaultTrainingPrefs() {
     barbellDisplay: 'plates',           // stored plates only, bar excluded
     machineLoadHandling: 'raw',         // never normalised between machines
     dumbbellIncrementBasis: 'per-hand', // +2.5 kg/hand = +5 kg of stored total
+    /** Always print both readings of a dumbbell load, never just one. */
+    dumbbellShowBoth: true,
+
+    /* Load context — see engine/context.js */
+    /** Offer a machine/attachment tag on cable and machine movements. */
+    trackMachineContext: true,
+    /**
+     * Flag a load that moves further between sessions than any programmed
+     * increment could explain, on machine-scaled movements only. Off makes the
+     * app read a walk to a different cable stack as a strength change, which is
+     * why it is on.
+     */
+    flagLoadDiscontinuities: true,
+
+    /* Schedule */
+    /**
+     * Allow any day's workout to be started on any day. The program's own
+     * missed-day rules describe the split as rolling rather than
+     * calendar-locked, so this matches the plan rather than bending it.
+     */
+    allowAnyDayWorkout: true,
   };
 }
 
@@ -153,6 +174,8 @@ const MIGRATIONS = [
   migrateV1ToV2,
   // index 2: v2 -> v3 (week one's squats were hack squats, logged as back squats)
   migrateV2ToV3,
+  // index 3: v3 -> v4 (load context and substitution on every entry)
+  migrateV3ToV4,
 ];
 
 /**
@@ -306,6 +329,70 @@ function renameSessionExercises(session) {
 
     changed = true;
     return { ...entry, exerciseId: renamed };
+  });
+
+  return changed ? { ...session, entries } : session;
+}
+
+/**
+ * v3 -> v4: give every entry the two fields that say what its numbers *mean*.
+ *
+ * **Strictly additive, and it guesses nothing.** Every entry gains
+ * `context: null` and `substitution: null`, and not one weight, rep count,
+ * completion flag, RPE, kind, date, note, exercise id or ordering changes.
+ *
+ * Why null rather than a best guess
+ * ---------------------------------
+ * The real history contains obvious machine changes: the rope pushdown reads
+ * 9.1, then 20, then 50, and the low-to-high fly goes 4.5 to 10 in one week.
+ * It would be easy to write a migration that walked those series, found the
+ * jumps, and stamped "machine A" and "machine B" onto either side of each one.
+ *
+ * That would be an invention. The app does not know which machine any of those
+ * numbers came off, whether the 20 and the 50 were the same stack on different
+ * pins, or whether one of the jumps was a genuine and hard-won increase. A tag
+ * is a statement of fact by the user; manufacturing one and then presenting it
+ * back to them as their own record is worse than having none.
+ *
+ * So the field is left empty, and the *engine* handles the untagged history
+ * instead — `engine/context.js` flags a load that moves further than any
+ * programmed increment can explain, declines to read it as strength, and says
+ * so in words that ask rather than assert. When the user tags a machine, the
+ * flag gives way to the fact.
+ *
+ * Idempotent: an entry that already carries the keys is returned untouched, so
+ * re-running this, or importing a backup that has already been through it, is a
+ * no-op rather than a second pass that nulls out real tags.
+ */
+function migrateV3ToV4(snapshot) {
+  const sessions = snapshot[COLLECTIONS.SESSIONS];
+  if (Array.isArray(sessions)) {
+    snapshot[COLLECTIONS.SESSIONS] = sessions.map(upgradeSessionToV4);
+  }
+
+  // v3 databases predate the machine-tagging preference. `init()` has already
+  // seeded the defaults; make sure a partial object still ends up complete.
+  snapshot[COLLECTIONS.TRAINING] = {
+    ...defaultTrainingPrefs(),
+    ...(isPlainObject(snapshot[COLLECTIONS.TRAINING]) ? snapshot[COLLECTIONS.TRAINING] : {}),
+  };
+
+  return snapshot;
+}
+
+function upgradeSessionToV4(session) {
+  if (!session || !Array.isArray(session.entries)) return session;
+
+  let changed = false;
+  const entries = session.entries.map((entry) => {
+    if (!entry || typeof entry !== 'object') return entry;
+    if ('context' in entry && 'substitution' in entry) return entry;
+    changed = true;
+    return {
+      ...entry,
+      context: entry.context ?? null,
+      substitution: entry.substitution ?? null,
+    };
   });
 
   return changed ? { ...session, entries } : session;

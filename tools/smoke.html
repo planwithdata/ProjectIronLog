@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<!--
+  tools/smoke.html — Does every route render, against real data?
+
+    chrome --headless=new --virtual-time-budget=40000 \
+           --dump-dom http://127.0.0.1:PORT/tools/smoke.html
+
+  The gap this fills: `tools/e2e.html` drives the *services* and asserts their
+  return values, and `tools/test-flow.mjs` does the same in Node. Neither
+  renders a page. So a page could reference a function that no longer exists —
+  the classic no-build failure — and every test in the suite would still pass
+  while the screen was blank.
+
+  This restores `ironlog-backup-*.json` if one is served alongside the app, then
+  mounts every route in turn inside an iframe-free harness and reports:
+
+    - any error or unhandled rejection thrown while rendering,
+    - any console.error the page produced,
+    - how many DOM nodes each route rendered, so a route that "succeeds" by
+      rendering nothing is still visible as a failure.
+
+  It also boots the **real shell** — `index.html`, and therefore `js/app.js` —
+  in an iframe first, and fails if it does not come up. That step is not
+  redundant with the rest: rendering page modules directly never executes
+  `app.js`, and a broken `app.js` is a blank screen with every other test
+  passing. It has happened: an unused-import sweep removed `$` from `app.js`,
+  the first line of `boot()` threw a ReferenceError, and nothing in the suite
+  noticed because nothing in the suite loaded the app.
+
+  It writes to Local Storage on this origin, so run it against a throwaway
+  profile — never against a browser holding real training data.
+-->
+<html>
+<head><meta charset="utf-8"><title>smoke</title>
+<link rel="stylesheet" href="../css/tokens.css">
+<link rel="stylesheet" href="../css/base.css">
+<link rel="stylesheet" href="../css/layout.css">
+<link rel="stylesheet" href="../css/components.css">
+<link rel="stylesheet" href="../css/workout.css">
+<link rel="stylesheet" href="../css/charts.css">
+<link rel="stylesheet" href="../css/reports.css">
+</head>
+<body style="margin:0;font:12px monospace;background:#fff;color:#111">
+<pre id="out">running…</pre>
+<div id="stage" style="position:absolute;left:-9999px;top:0;width:390px"></div>
+
+<script type="module">
+  import * as db from '../js/services/db.js';
+  import * as programService from '../js/services/program-service.js';
+  import * as sessionService from '../js/services/session-service.js';
+  import * as settingsService from '../js/services/settings-service.js';
+
+  const lines = [];
+  const problems = [];
+
+  // Anything the page throws or logs as an error is a failure, whether or not
+  // it happens to leave the DOM looking plausible.
+  const realError = console.error;
+  console.error = (...args) => {
+    problems.push(`console.error: ${args.map(String).join(' ')}`);
+    realError(...args);
+  };
+  window.addEventListener('error', (event) => {
+    problems.push(`window error: ${event.message}`);
+  });
+  window.addEventListener('unhandledrejection', (event) => {
+    // The stack matters more than the message: an async rejection lands during
+    // whichever route happens to be rendering when it settles, not necessarily
+    // the one that caused it.
+    const frames = String(event.reason?.stack ?? '')
+      .split(/[\r\n]+/)
+      .slice(1, 4)
+      .join(' | ');
+    problems.push(`unhandled rejection: ${event.reason}${frames ? ` @ ${frames}` : ''}`);
+  });
+
+  /** Every page module, with the params each needs to reach its real branches. */
+  const ROUTES = [
+    { name: 'home',     module: '../js/pages/home.js',     params: {} },
+    { name: 'workout',  module: '../js/pages/workout.js',  params: {} },
+    { name: 'progress', module: '../js/pages/progress.js', params: {} },
+    { name: 'history',  module: '../js/pages/history.js',  params: {} },
+    { name: 'logs',     module: '../js/pages/logs.js',     params: {} },
+    { name: 'notes',    module: '../js/pages/notes.js',    params: {} },
+    { name: 'photos',   module: '../js/pages/photos.js',   params: {} },
+    { name: 'reports',  module: '../js/pages/reports.js',  params: {} },
+    { name: 'settings', module: '../js/pages/settings.js', params: {} },
+  ];
+
+  async function loadBackup() {
+    // Served from the repo root alongside the app when one is present.
+    for (const name of ['ironlog-backup-2026-09-02.json', 'ironlog-backup-2026-08-12.json']) {
+      try {
+        const response = await fetch(`../${name}`, { cache: 'no-cache' });
+        if (response.ok) return { name, payload: await response.json() };
+      } catch { /* not served; fall through */ }
+    }
+    return null;
+  }
+
+  /** Render one page module into the stage and report what came out. */
+  async function renderRoute(route, label) {
+    const before = problems.length;
+    const stage = document.getElementById('stage');
+    stage.replaceChildren();
+
+    let nodes = 0;
+    let teardown = null;
+
+    try {
+      const page = await import(route.module);
+      const node = page.render(route.params);
+      stage.append(node);
+      // `mount()` is where the rest bar, chart disposal and event
+      // subscriptions live, so a route is not really exercised without it.
+      if (typeof page.mount === 'function') teardown = page.mount();
+      nodes = stage.querySelectorAll('*').length;
+    } catch (error) {
+      problems.push(`${label}: threw ${error && error.stack ? error.stack.split('\n')[0] : error}`);
+    }
+
+    // Charts load Chart.js asynchronously; give them a turn to fail.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    try {
+      if (typeof teardown === 'function') teardown();
+    } catch (error) {
+      problems.push(`${label}: teardown threw ${error}`);
+    }
+
+    const newProblems = problems.length - before;
+    // A route that renders *nothing* has failed even without throwing, but an
+    // empty-state card is legitimately small — Progress and History on day one
+    // render a single card and a paragraph. So the floor is "more than an
+    // empty div", not "looks like a full page".
+    const verdict = newProblems === 0 && nodes >= 5 ? 'ok  ' : 'FAIL';
+    lines.push(`  ${verdict} ${label.padEnd(34)} ${String(nodes).padStart(5)} nodes`);
+    stage.replaceChildren();
+  }
+
+  /**
+   * Boot the real shell in an iframe and confirm it came up.
+   *
+   * Waits on the app's own `data-booted` flag rather than on a timer: under
+   * `--virtual-time-budget` a timer fires instantly while modules are still
+   * loading, so a timed wait would measure an unbooted document and pass.
+   * Polling on a flag that only the app sets cannot do that.
+   */
+  async function bootShell() {
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'position:absolute;left:-9999px;width:402px;height:900px;border:0';
+    frame.src = '../index.html#/home';
+    document.body.append(frame);
+
+    await new Promise((resolve) => { frame.onload = resolve; setTimeout(resolve, 8000); });
+
+    const doc = frame.contentDocument;
+    let booted = false;
+    for (let attempt = 0; attempt < 120 && !booted; attempt += 1) {
+      booted = Boolean(doc?.documentElement?.dataset?.booted);
+      if (!booted) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const rendered = Boolean(doc?.querySelector('.page'));
+    if (!booted || !rendered) {
+      problems.push(
+        `shell: index.html did not boot (booted=${booted}, rendered a page=${rendered}). `
+        + 'Check js/app.js — every route test can pass while the app itself is blank.'
+      );
+    }
+    lines.push(`  ${booted && rendered ? 'ok  ' : 'FAIL'} index.html (js/app.js)`
+      + `${booted && rendered ? '' : ' — see problems below'}`);
+    frame.remove();
+  }
+
+  /* --- Run ------------------------------------------------------------- */
+
+  try {
+    await db.init();
+    await programService.load();
+    await settingsService.init?.();
+
+    const backup = await loadBackup();
+    if (backup) {
+      await db.importAll(backup.payload);
+      lines.push(`restored ${backup.name}`);
+      lines.push(`  ${db.read('sessions').length} sessions, `
+        + `schema v${db.read('meta').schemaVersion}`);
+    } else {
+      lines.push('no backup served — rendering against an empty database');
+    }
+    lines.push('');
+
+    /* The shell first: if `app.js` is broken, nothing else matters. */
+    lines.push('the real shell');
+    await bootShell();
+    lines.push('');
+
+    /* Every route, with real history behind it. */
+    lines.push('routes — with history');
+    for (const route of ROUTES) await renderRoute(route, route.name);
+
+    /* The logging branch: a session open, which is a different render path on
+       Workout and on Home, and the one that carries the new machine and
+       substitution controls. */
+    if (backup) {
+      lines.push('');
+      lines.push('routes — mid-workout');
+      const day = programService.getTrainingDays()[0];
+      const session = await sessionService.startSession(day.id);
+      // Log one set so the finish panel and the earned-advance pill render.
+      await sessionService.updateSet(session.id, session.entries[0].exerciseId, 0, {
+        weightKg: 40, reps: 8, completed: true,
+      });
+      // And mark it as a top set, which is the new control.
+      await sessionService.setTopSet(session.id, session.entries[0].exerciseId, 0, true);
+      await renderRoute({ name: 'workout', module: '../js/pages/workout.js', params: {} },
+        'workout (logging)');
+      await renderRoute({ name: 'home', module: '../js/pages/home.js', params: {} },
+        'home (session open)');
+      await sessionService.abandonSession(session.id);
+    }
+
+    /* One session's detail view, which is its own branch of History. */
+    const first = sessionService.getCompletedSessions()[0];
+    if (first) {
+      lines.push('');
+      lines.push('routes — one session');
+      await renderRoute(
+        { name: 'history', module: '../js/pages/history.js', params: { id: first.id } },
+        'history (detail)'
+      );
+    }
+
+    /* And an empty database, which is day one and its own set of branches. */
+    lines.push('');
+    lines.push('routes — empty database');
+    await db.reset();
+    for (const route of ROUTES) await renderRoute(route, `${route.name} (empty)`);
+  } catch (error) {
+    problems.push(`harness: ${error && error.stack ? error.stack : error}`);
+  }
+
+  const verdict = problems.length === 0 ? 'PASS' : 'FAIL';
+  const report = [
+    `${verdict} — ${problems.length} problem${problems.length === 1 ? '' : 's'}`,
+    '',
+    ...lines,
+    ...(problems.length ? ['', 'problems:', ...problems.map((p) => `  ${p}`)] : []),
+  ].join('\n');
+
+  document.getElementById('out').textContent = report;
+  document.title = verdict;
+</script>
+</body>
+</html>
