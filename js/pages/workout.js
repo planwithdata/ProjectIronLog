@@ -21,7 +21,7 @@ import { el, icon, replace, append } from '../core/dom.js';
 import { go, refresh } from '../core/router.js';
 import { toast } from '../core/events.js';
 import {
-  today, isoWeekday, pluralize, trimNumber, displayWeight,
+  today, addDays, isoWeekday, pluralize, trimNumber, displayWeight,
   relativeDay, formatDuration, formatLoad, formatLoadSecondary,
 } from '../core/format.js';
 import * as programService from '../services/program-service.js';
@@ -75,12 +75,13 @@ export function render(params = {}) {
     ]);
   }
 
-  const wave = programService.getTrainingWeek(dayKey);
+  const wave = active ?? programService.getTrainingWeek(dayKey);
   const session = active && active.dayId === day.id ? active : null;
 
   return el('div.page.enter', {}, [
     daySwitcher(day, dayKey, Boolean(active)),
     dayHeader(day, wave, session),
+    planningControls(day, session),
     day.type === 'training'
       ? el('div.stack', {},
           visibleExercises(day, session).map((exercise) =>
@@ -1827,3 +1828,34 @@ export const page = {
   render,
   mount,
 };
+
+function planningControls(day, session) {
+  if (day.type !== 'training') return null;
+  const button = (text, click) => el('button.btn.btn--ghost.btn--sm', { type: 'button', text, on: { click: async () => {
+    try { await click(); } catch (error) { toast(error.message); }
+  } } });
+  return el('div.row', { style: { flexWrap: 'wrap' } }, [
+    !session ? el('p.t-footnote.t-dim', { text: programService.getScheduleChanges().filter((item) => item.dayId === day.id && (item.targetDate >= today() || item.scheduledDate >= today())).map((item) => `${item.scheduledDate}: ${item.status === 'skipped' ? 'skipped' : 'moved to ' + item.targetDate}`).join(' ? ') }) : null,
+    !session ? button('Postpone / reschedule / skip', async () => {
+      const fit = programService.getScheduleFit(day.id);
+      const original = el('input.input', { type: 'date', value: fit.scheduledDate, 'aria-label': 'Original scheduled date' });
+      const target = el('input.input', { type: 'date', value: addDays(today(), 1), 'aria-label': 'New workout date' });
+      const action = await openSheet({ title: 'Adjust this workout', text: 'Moves keep their original slot. Skipped slots are excluded from adherence; no workout history or progression is changed.',
+        body: [el('label', { text: 'Original scheduled date' }), original, el('label', { text: 'New date (tomorrow to postpone)' }), target],
+        actions: [{ label: 'Move workout', value: 'rescheduled', tone: 'primary' }, { label: 'Skip this occurrence', value: 'skipped' }, { label: 'Restore original schedule', value: 'reset' }, { label: 'Cancel', value: null }] });
+      if (!action) return;
+      await programService.changeSchedule(day.id, original.value, target.value, action);
+      refresh();
+    }) : null,
+    button(session ? (session.isDeload ? 'Performed: deload' : 'Performed: normal intensity') : 'Deload controls', async () => {
+      const action = await openChoiceSheet({ title: session ? 'Actual workout intensity' : 'Deload plan',
+        text: session ? 'Classifies this workout for progression and reports. Logged sets and weights stay intact.' : 'Start or postpone a seven-day deload, or skip the current training week. Changes apply to workouts started afterwards.',
+        choices: session ? [{ value: 'normal', label: 'Normal intensity' }, { value: 'deload', label: 'Deload' }]
+          : [{ value: 'start', label: 'Start deload now' }, { value: 'postpone', label: 'Postpone deload one week' }, { value: 'skip', label: 'Skip deload this week' }] });
+      if (!action) return;
+      if (session) await sessionService.setSessionIntensity(session.id, action === 'deload');
+      else await programService.setDeloadPlan(action);
+      refresh();
+    }),
+  ].filter(Boolean));
+}

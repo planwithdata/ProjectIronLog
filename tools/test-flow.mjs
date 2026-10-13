@@ -616,3 +616,46 @@ test('the two-week review reads a machine change as unreadable, not as a gain', 
   assert.equal(strength.advancing.includes('Rope Triceps Pushdown'), false,
     'and never reported as advancing');
 });
+
+
+test('a moved workout keeps its occurrence across weeks and backups', async () => {
+  await freshDb('2026-08-01');
+  const before = programService.getScheduleCompletion('2026-08-10', '2026-08-16').scheduled;
+  await programService.changeSchedule('tuesday-chest', '2026-08-11', '2026-08-17');
+  assert.equal(programService.getScheduleCompletion('2026-08-10', '2026-08-16').scheduled, before - 1);
+  const id = await logSession('tuesday-chest', '2026-08-17', { 'flat-dumbbell-bench-press': { weightKg: 40, reps: [8, 8, 8] } });
+  assert.equal(sessionService.getSessionById(id).schedule.scheduledDate, '2026-08-11');
+  assert.equal(programService.getScheduleCompletion('2026-08-17', '2026-08-17').done, 1);
+  const snapshot = structuredClone(db.exportAll());
+  await db.importAll(snapshot);
+  assert.deepEqual(db.exportAll().data.sessions, snapshot.data.sessions);
+  assert.deepEqual(programService.getScheduleChanges(), snapshot.data.profile.scheduleChanges);
+  await programService.changeSchedule('tuesday-chest', '2026-08-18', null, 'skipped');
+  assert.equal(programService.getScheduleCompletion('2026-08-18', '2026-08-18').scheduled, 0);
+});
+
+test('manual deloads preserve normal working loads and actual intensity overrides the schedule', async () => {
+  await freshDb('2026-08-01');
+  await logSession('tuesday-chest', '2026-08-11', { 'flat-dumbbell-bench-press': { weightKg: 40, reps: [7, 7, 7] } });
+  await programService.setDeloadPlan('start', '2026-08-18');
+  const id = await logSession('tuesday-chest', '2026-08-18', { 'flat-dumbbell-bench-press': { weightKg: 26, reps: [6, 6] } });
+  assert.equal(sessionService.getSessionById(id).isDeload, true);
+  await programService.setDeloadPlan('skip', '2026-08-25');
+  assert.equal(offered('flat-dumbbell-bench-press', '2026-08-25').weightKg, 40);
+  await programService.setDeloadPlan('postpone', '2026-08-29');
+  assert.equal(programService.getTrainingWeek('2026-08-29').isDeload, false);
+  assert.equal(programService.getTrainingWeek('2026-09-05').isDeload, true);
+  const normal = await sessionService.startSession('tuesday-chest', '2026-08-29');
+  assert.equal(normal.scheduledDeload, true);
+  assert.equal(normal.isDeload, false);
+});
+
+test('editing an old workout preserves completion time and duration', async () => {
+  await freshDb();
+  const id = await logSession('tuesday-chest', '2026-08-11', { 'flat-dumbbell-bench-press': { weightKg: 40, reps: [8, 8, 8] } });
+  await db.replaceById(db.COLLECTIONS.SESSIONS, id, { startedAt: '2026-08-11T10:00:00Z', completedAt: '2026-08-11T11:00:00Z', durationSeconds: 3600 });
+  await sessionService.reopenSession(id);
+  const edited = await sessionService.completeSession(id);
+  assert.equal(edited.durationSeconds, 3600);
+  assert.equal(edited.completedAt, '2026-08-11T11:00:00Z');
+});

@@ -145,7 +145,67 @@ export function getDayByWeekday(weekday) {
 
 /** Whatever today's calendar weekday maps to in the split. */
 export function getTodayDay(dayKey = today()) {
+  const moved = getScheduleChanges().find((item) => item.targetDate === dayKey && item.status !== 'skipped');
+  if (moved) return getDayById(moved.dayId);
+  const regular = getDayByWeekday(isoWeekday(dayKey));
+  if (getScheduleChanges().some((item) => item.dayId === regular?.id && item.scheduledDate === dayKey)) return null;
   return getDayByWeekday(isoWeekday(dayKey));
+}
+
+export function getScheduleChanges() {
+  return db.read(COLLECTIONS.PROFILE).scheduleChanges ?? [];
+}
+
+export async function changeSchedule(dayId, scheduledDate, targetDate = null, status = 'rescheduled') {
+  if (getDayById(dayId)?.type !== 'training') throw new Error('Choose a training day.');
+  if (!['rescheduled', 'skipped', 'reset'].includes(status)) throw new Error('Unknown schedule action.');
+  const valid = (date) => /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date;
+  if (!valid(scheduledDate) || (status === 'rescheduled' && !valid(targetDate))) throw new Error('Choose a valid date.');
+  if (isoWeekday(scheduledDate) !== getDayById(dayId).weekday) throw new Error('Choose the original weekday for this workout.');
+  return db.update(COLLECTIONS.PROFILE, (profile) => ({
+    ...profile,
+    scheduleChanges: [...(profile.scheduleChanges ?? []).filter((item) =>
+      item.dayId !== dayId || item.scheduledDate !== scheduledDate),
+    ...(status === 'reset' ? [] : [{ dayId, scheduledDate, targetDate: status === 'skipped' ? null : targetDate, status }])],
+  }));
+}
+
+/** Optional dated overrides travel with the existing profile backup. */
+export async function setDeloadPlan(action, dayKey = today()) {
+  const wave = getTrainingWeek(dayKey);
+  const end = addDays(dayKey, 6);
+  const ranges = action === 'start' ? [{ start: dayKey, end, isDeload: true }]
+    : action === 'postpone' ? [{ start: dayKey, end, isDeload: false }, { start: addDays(dayKey, 7), end: addDays(dayKey, 13), isDeload: true }]
+    : [{ start: dayKey, end: addDays(dayKey, 6 - (wave.dayCount % 7)), isDeload: false }];
+  return db.update(COLLECTIONS.PROFILE, (profile) => ({ ...profile,
+    deloadOverrides: [...(profile.deloadOverrides ?? []), ...ranges],
+  }));
+}
+
+/** Count unique due occurrences, including moves across week boundaries. */
+export function getScheduleCompletion(start, end) {
+  const profile = db.read(COLLECTIONS.PROFILE);
+  const changes = getScheduleChanges();
+  const due = new Map();
+  const add = (dayId, date, target = date, skipped = false) => {
+    if (!skipped && target >= start && target <= end && (!profile.programStartDate || target >= profile.programStartDate)) due.set(`${dayId}:${date}`, { dayId, date });
+  };
+  for (let date = start; date <= end; date = addDays(date, 1)) {
+    const day = getDayByWeekday(isoWeekday(date));
+    if (day?.type !== 'training') continue;
+    if (!changes.some((item) => item.dayId === day.id && item.scheduledDate === date)) add(day.id, date);
+  }
+  for (const item of changes) add(item.dayId, item.scheduledDate, item.targetDate, item.status === 'skipped');
+  const doneKeys = new Set();
+  for (const session of db.read(COLLECTIONS.SESSIONS)) {
+    if (session.status !== 'completed' || session.date > end || !(session.entries ?? []).some((entry) => (entry.sets ?? []).some((set) => set.completed))) continue;
+    if (session.schedule?.status === 'extra') continue;
+    const date = session.schedule?.scheduledDate ?? getScheduleFit(session.dayId, session.date, false).scheduledDate;
+    const key = `${session.dayId}:${date}`;
+    if (due.has(key)) doneKeys.add(key);
+  }
+  return { done: doneKeys.size, scheduled: due.size,
+    outstanding: [...due].filter(([key]) => !doneKeys.has(key)).map(([, item]) => ({ day: getDayById(item.dayId), fit: getScheduleFit(item.dayId, end) })) };
 }
 
 /**
@@ -367,9 +427,10 @@ export function getTrainingWeek(dayKey = today()) {
   const startDate = profile.programStartDate;
   const wave = getProgram().program?.wave ?? { loadingWeeks: 4, deloadWeek: 5 };
   const cycleLength = wave.deloadWeek ?? (wave.loadingWeeks + 1);
+  const override = [...(profile.deloadOverrides ?? [])].reverse().find((item) => dayKey >= item.start && dayKey <= item.end);
 
   if (!startDate) {
-    return { week: 1, waveWeek: 1, isDeload: false, startDate: null, dayCount: 0 };
+    return { week: 1, waveWeek: 1, isDeload: override?.isDeload ?? false, scheduledDeload: false, startDate: null, dayCount: 0 };
   }
 
   const dayCount = Math.max(0, daysBetween(startDate, dayKey));
@@ -379,7 +440,8 @@ export function getTrainingWeek(dayKey = today()) {
   return {
     week,
     waveWeek,
-    isDeload: waveWeek === cycleLength,
+    isDeload: override?.isDeload ?? (waveWeek === cycleLength),
+    scheduledDeload: waveWeek === cycleLength,
     startDate,
     dayCount,
   };
@@ -418,7 +480,7 @@ export const SCHEDULE_STATUS = {
  *   scheduledDate: string|null, label: string,
  * }}
  */
-export function getScheduleFit(dayId, dateKey = today()) {
+export function getScheduleFit(dayId, dateKey = today(), useChanges = true) {
   const day = getDayById(dayId);
   const scheduledWeekday = day?.weekday ?? null;
 
@@ -439,7 +501,11 @@ export function getScheduleFit(dayId, dateKey = today()) {
   if (offsetDays > 3) offsetDays -= 7;
   if (offsetDays < -3) offsetDays += 7;
 
-  const scheduledDate = addDays(dateKey, -offsetDays);
+  let scheduledDate = addDays(dateKey, -offsetDays);
+  if (useChanges) {
+    const moved = getScheduleChanges().find((item) => item.dayId === dayId && item.targetDate === dateKey && item.status !== 'skipped');
+    if (moved) { scheduledDate = moved.scheduledDate; offsetDays = daysBetween(scheduledDate, dateKey); }
+  }
   const status = offsetDays === 0
     ? SCHEDULE_STATUS.ON_DAY
     : (offsetDays > 0 ? SCHEDULE_STATUS.LATE : SCHEDULE_STATUS.EARLY);

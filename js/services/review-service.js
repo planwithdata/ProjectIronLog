@@ -32,6 +32,8 @@ export function gather(days = 14, endKey = today()) {
   const priorEnd = addDays(startKey, -1);
 
   return {
+    goal: settingsService.getProfile().trainingGoal ?? 'recomp',
+    waist: waistBundle(startKey, endKey),
     period: { start: startKey, end: endKey, days },
     weight: weightBundle(startKey, endKey, days),
     bodyFat: bodyFatBundle(startKey, endKey),
@@ -120,21 +122,17 @@ function weightBundle(startKey, endKey, days) {
   const endAvg = bodyService.getAverageWeight(7, endKey);
 
   let perWeek = null;
-  if (startAvg && endAvg) {
+  if (days >= 14 && startAvg?.count >= 3 && endAvg?.count >= 3) {
     const span = Math.max(1, days - 7);
     perWeek = ((endAvg.average - startAvg.average) / span) * 7;
   }
 
   // With under two weeks of readings the two windows overlap, so a
-  // window-to-window comparison says nothing. Fall back to the lean bulk rate,
-  // which is computed on rolling averages and degrades more gracefully.
-  if (perWeek === null) {
-    perWeek = bodyService.getLeanBulkRate(endKey)?.kgPerWeek ?? null;
-  }
+  // window-to-window comparison says nothing; leave the trend unknown.
 
   return {
-    startAvg: startAvg?.average ?? null,
-    endAvg: endAvg?.average ?? null,
+    startAvg: days >= 14 && startAvg?.count >= 3 ? startAvg.average : null,
+    endAvg: endAvg?.count >= 3 ? endAvg.average : null,
     perWeek,
     goalKg: settingsService.getGoalWeightKg(),
     readings: bodyService.getWeightEntries()
@@ -155,11 +153,7 @@ function bodyFatBundle(startKey, endKey) {
 }
 
 function adherenceBundle(startKey, endKey, days) {
-  const trainingDays = programService.getTrainingDays().length;
-  const weeks = days / 7;
-  const scheduled = Math.round(trainingDays * weeks);
-  const done = sessionsIn(startKey, endKey).length;
-  return { done, scheduled: Math.max(scheduled, done) };
+  return programService.getScheduleCompletion(startKey, endKey);
 }
 
 /**
@@ -192,6 +186,7 @@ function strengthBundle(startKey, endKey, priorStart, priorEnd) {
   const painExcluded = [];
 
   const scaleChanged = [];
+  const comparisons = [];
 
   for (const exercise of programService.getAllExercises()) {
     // A warm-up-only movement has no working sets and therefore no strength
@@ -209,7 +204,7 @@ function strengthBundle(startKey, endKey, priorStart, priorEnd) {
     // as a regression. A session cut short because an elbow hurt is not
     // evidence of lost strength, and reporting it as such would push the
     // recommendation ladder toward "add calories" for no reason.
-    const history = all.filter((performance) => !performance.painLimited);
+    const history = all.filter((performance) => !performance.painLimited && !performance.incomplete && !performance.substituted);
     const excludedInPeriod = all.some((performance) =>
       performance.painLimited && performance.date >= startKey && performance.date <= endKey);
     if (excludedInPeriod) painExcluded.push(exercise.name);
@@ -246,11 +241,12 @@ function strengthBundle(startKey, endKey, priorStart, priorEnd) {
     const previous = best(priorStart, priorEnd);
 
     if (!current || !previous) continue;   // needs both periods to compare
+    comparisons.push({ exerciseId: exercise.id, name: exercise.name, current, previous });
 
     // A 1% band absorbs rounding in the 1RM estimate; below that it is noise.
     if (current > previous * 1.01) { improved += 1; advancing.push(exercise.name); }
     else if (current < previous * 0.99) { regressed += 1; stalled.push(exercise.name); }
-    else { held += 1; stalled.push(exercise.name); }
+    else { held += 1; }
   }
 
   return {
@@ -258,6 +254,7 @@ function strengthBundle(startKey, endKey, priorStart, priorEnd) {
     held,
     regressed,
     tracked: improved + held + regressed,
+    comparisons,
     advancing,
     stalled,
     painExcluded,
@@ -282,7 +279,7 @@ function volumeBundle(startKey, endKey, priorStart, priorEnd) {
   const currentKg = sum(startKey, endKey);
   const previousKg = sum(priorStart, priorEnd);
 
-  return { currentKg, previousKg: previousKg || null };
+  return { currentKg, previousKg: previousKg || null, comparable: false };
 }
 
 /**
@@ -293,6 +290,8 @@ function volumeBundle(startKey, endKey, priorStart, priorEnd) {
  */
 function setTypeBundle(startKey, endKey) {
   const totals = {
+    deloadSessions: 0,
+    scheduledNormalSessions: 0,
     workingSets: 0,
     topSets: 0,
     warmupSets: 0,
@@ -312,6 +311,8 @@ function setTypeBundle(startKey, endKey) {
   const substituted = new Set();
 
   for (const session of sessionsIn(startKey, endKey)) {
+    if (session.isDeload) totals.deloadSessions += 1;
+    if (session.scheduledDeload && !session.isDeload) totals.scheduledNormalSessions += 1;
     const counts = sessionService.getSessionSetCounts(session);
     const volume = sessionService.getSessionVolumeBreakdown(session);
 
@@ -395,6 +396,20 @@ function sessionsIn(startKey, endKey) {
 }
 
 function recordsIn(startKey, endKey) {
-  return prService.getRecordFeed()
-    .filter((record) => record.date >= startKey && record.date <= endKey);
+  const seen = new Set();
+  return prService.getVerifiedFeed().filter((record) => {
+    if (record.date < startKey || record.date > endKey || !prService.HEADLINE_KINDS.includes(record.kind)) return false;
+    const history = sessionService.getExerciseHistory(record.exerciseId, Infinity);
+    if (!history.some((item) => item.date < record.date && !item.isDeload && item.sets.length)) return false;
+    const key = `${record.exerciseId}:${record.sessionId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function waistBundle(startKey, endKey) {
+  const points = measurements.between(startKey, endKey).filter((item) => Number.isFinite(item.waist));
+  if (points.length < 2) return null;
+  return { start: points[0].waist, end: points.at(-1).waist };
 }

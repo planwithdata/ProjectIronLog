@@ -330,7 +330,7 @@ export async function startSession(dayId, dayKey = today()) {
   // performed on Wednesday, one day late — not a Wednesday session that has
   // mysteriously grown a bench press.
   const fit = programService.getScheduleFit(dayId, dayKey);
-  const schedule = completedThisWeek(dayId, dayKey)
+  const schedule = getCompletedSessions().some((item) => item.dayId === dayId && getSchedule(item)?.scheduledDate === fit.scheduledDate)
     ? { ...fit, status: programService.SCHEDULE_STATUS.EXTRA,
         label: programService.describeScheduleFit(programService.SCHEDULE_STATUS.EXTRA, fit.offsetDays) }
     : fit;
@@ -344,6 +344,7 @@ export async function startSession(dayId, dayKey = today()) {
     week: wave.week,
     waveWeek: wave.waveWeek,
     isDeload: wave.isDeload,
+    scheduledDeload: wave.scheduledDeload,
     schedule,
     entries: day.exercises
       // The pre-workout warm-up is a preference, so an entry for it is only
@@ -367,7 +368,7 @@ export async function startSession(dayId, dayKey = today()) {
  * user as they log earlier sets of the same session.
  */
 function buildEntry(exercise, wave, dayKey = today()) {
-  const history = getExerciseHistory(exercise.id, 6);
+  const history = getExerciseHistory(exercise.id, Infinity);
   const loadPrefs = trainingPrefs.getLoadPrefs();
 
   // A warm-up-only movement has no working sets at all, so there is nothing for
@@ -487,7 +488,7 @@ export function getRecommendation(exercise, dayKey = today(), options = {}) {
   const setCount = wave.isDeload
     ? programService.deloadSets(exercise.sets)
     : exercise.sets;
-  const history = getExerciseHistory(exercise.id, 6);
+  const history = getExerciseHistory(exercise.id, Infinity);
 
   // Same carry-forward as `buildEntry`, so the browse view and the session it
   // starts show the same load rather than differing by a machine tag.
@@ -671,15 +672,16 @@ export async function completeSession(sessionId) {
   const session = getSessionById(sessionId);
   if (!session) throw new Error('That session no longer exists.');
 
-  const completedAt = new Date().toISOString();
-  const durationSeconds = session.startedAt
+  const completedAt = session.editingCompletedAt ?? new Date().toISOString();
+  const durationSeconds = session.editingCompletedAt ? (session.durationSeconds ?? null) : session.startedAt
     ? Math.max(0, Math.round((new Date(completedAt) - new Date(session.startedAt)) / 1000))
     : null;
 
   const updated = await db.replaceById(COLLECTIONS.SESSIONS, sessionId, {
     status: 'completed',
     completedAt,
-    durationSeconds,
+    editingCompletedAt: null,
+    durationSeconds: Number.isFinite(durationSeconds) && durationSeconds <= 6 * 3600 ? durationSeconds : null,
   });
 
   await settingsService.ensureProgramStart(session.date);
@@ -708,8 +710,10 @@ export async function reopenSession(sessionId) {
   if (open && open.id !== sessionId) {
     throw new Error('Finish or discard the workout in progress first.');
   }
+  const session = getSessionById(sessionId);
   return db.replaceById(COLLECTIONS.SESSIONS, sessionId, {
     status: 'in-progress',
+    editingCompletedAt: session.editingCompletedAt ?? session.completedAt,
     completedAt: null,
   });
 }
@@ -1339,25 +1343,7 @@ export function getWeekCompletion(dayKey = today()) {
   const weekday = isoWeekday(dayKey);
   const monday = addDays(dayKey, -(weekday - 1));
 
-  const scheduled = programService
-    .getTrainingDays()
-    .filter((day) => day.weekday <= weekday);
-
-  const completedDayIds = new Set(
-    getCompletedSessions()
-      .filter((session) => session.date >= monday && session.date <= dayKey)
-      .map((session) => session.dayId)
-  );
-
-  const done = scheduled.filter((day) => completedDayIds.has(day.id)).length;
-  const total = scheduled.length;
-
-  // Which of this week's scheduled days have not been done yet and are already
-  // behind. This is what makes a missed Tuesday actionable on Wednesday instead
-  // of simply gone: the day is still there, and it can still be trained.
-  const outstanding = scheduled
-    .filter((day) => !completedDayIds.has(day.id))
-    .map((day) => ({ day, fit: programService.getScheduleFit(day.id, dayKey) }));
+  const { done, scheduled: total, outstanding } = programService.getScheduleCompletion(monday, dayKey);
 
   const offSchedule = getCompletedSessions()
     .filter((session) => session.date >= monday && session.date <= dayKey)
@@ -1390,18 +1376,12 @@ export function getWeeklyStreak(dayKey = today()) {
   let streak = 0;
 
   // Only judge the current week if its last training day has passed.
-  const lastTrainingWeekday = Math.max(...trainingDays.map((day) => day.weekday));
-  if (weekday < lastTrainingWeekday) cursor = addDays(cursor, -7);
+  if (weekday < 7) cursor = addDays(cursor, -7);
 
   for (let i = 0; i < 260; i += 1) {   // hard stop at five years
     const weekEnd = addDays(cursor, 6);
-    const completedDayIds = new Set(
-      getCompletedSessions()
-        .filter((session) => session.date >= cursor && session.date <= weekEnd)
-        .map((session) => session.dayId)
-    );
-    const complete = trainingDays.every((day) => completedDayIds.has(day.id));
-    if (!complete) break;
+    const completion = programService.getScheduleCompletion(cursor, weekEnd);
+    if (!completion.scheduled || completion.done !== completion.scheduled) break;
     streak += 1;
     cursor = addDays(cursor, -7);
   }
@@ -1419,4 +1399,18 @@ export function getRecentSessions(days = 14, dayKey = today()) {
 export function getDaysSinceLastWorkout(dayKey = today()) {
   const last = getLastCompletedSession();
   return last ? daysBetween(last.date, dayKey) : null;
+}
+
+export async function setSessionIntensity(sessionId, isDeload) {
+  const session = getSessionById(sessionId);
+  if (!session) throw new Error('That session no longer exists.');
+  return db.replaceById(COLLECTIONS.SESSIONS, sessionId, {
+    isDeload, scheduledDeload: session.scheduledDeload ?? session.isDeload,
+  });
+}
+
+/** Wall-clock logs left open overnight are not credible training durations. */
+export function getDurationSeconds(session) {
+  const value = session?.durationSeconds;
+  return Number.isFinite(value) && value > 0 && value <= 6 * 3600 ? value : null;
 }

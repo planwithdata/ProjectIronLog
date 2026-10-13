@@ -67,6 +67,9 @@ export function buildReview(input) {
 
   addWeightFinding(findings, input);
   addBodyFatFinding(findings, input);
+  if (input.waist) findings.push({ key: 'waist', label: 'Waist', tone: TONE.NEUTRAL,
+    value: `${signed(input.waist.end - input.waist.start)} cm`,
+    text: `${fmt(input.waist.start)} to ${fmt(input.waist.end)} cm. Compare measurements taken under similar conditions alongside weight and strength.` });
   addAdherenceFinding(findings, input);
   addStrengthFinding(findings, input);
   addVolumeFinding(findings, input);
@@ -86,7 +89,7 @@ export function buildReview(input) {
 
 /* --- Findings ----------------------------------------------------------- */
 
-function addWeightFinding(findings, { weight }) {
+function addWeightFinding(findings, { weight, goal }) {
   if (!weight || weight.perWeek === null || weight.perWeek === undefined) {
     findings.push({
       key: 'weight',
@@ -109,7 +112,10 @@ function addWeightFinding(findings, { weight }) {
   let tone = TONE.GOOD;
   let text;
 
-  if (perWeek < 0) {
+  if (goal === 'recomp' || goal === 'mild-cut') {
+    tone = TONE.NEUTRAL;
+    text = `Weight trend: ${signed(perWeek)} kg/week. For recomp / a mild cut, interpret this alongside waist, repeatable working sets and recovery; weight gain is not required.`;
+  } else if (perWeek < 0) {
     tone = TONE.WATCH;
     text = `Losing ${fmt(Math.abs(perWeek))} kg/week. On a lean bulk this is a calorie deficit, not a plateau.`;
   } else if (perWeek < THRESHOLDS.gainSlow) {
@@ -123,7 +129,7 @@ function addWeightFinding(findings, { weight }) {
   }
 
   // The goal is a hard stop that overrides the rate judgement.
-  if (weight.goalKg && weight.endAvg && weight.endAvg >= weight.goalKg) {
+  if (goal !== 'recomp' && goal !== 'mild-cut' && weight.goalKg && weight.endAvg && weight.endAvg >= weight.goalKg) {
     tone = TONE.WATCH;
     text += ` You are at or past the ${fmt(weight.goalKg)} kg goal — time to decide whether to hold or cut.`;
   }
@@ -156,7 +162,7 @@ function addBodyFatFinding(findings, { bodyFat }) {
     value: `${signed(change)} %`,
     detail: `${fmt(bodyFat.startPercent)} → ${fmt(bodyFat.endPercent)} %`,
     text: change > 0.5
-      ? 'Body fat is rising faster than the scale noise. Worth watching alongside the gain rate.'
+      ? 'The scale estimate rose. Check repeated waist measurements and weight trends before interpreting it.'
       : 'Body fat is flat or falling while weight rises — that is what a lean bulk should look like.',
   });
 }
@@ -193,6 +199,7 @@ function addStrengthFinding(findings, { strength }) {
   if (!strength || !strength.tracked) return;
 
   const percent = Math.round((strength.improved / strength.tracked) * 100);
+  const preserved = strength.improved + (strength.held ?? 0);
 
   let tone = TONE.WATCH;
   let text = `Improved in ${strength.improved} of ${strength.tracked} tracked lifts.`;
@@ -202,13 +209,15 @@ function addStrengthFinding(findings, { strength }) {
     text += ' Progression is working.';
   } else if (percent < THRESHOLDS.strengthPoor) {
     tone = TONE.BAD;
-    text += ' Widespread stalling usually means recovery or calories, not programming.';
+    text += ' Check comparable sets, recovery and logging consistency before changing the plan.';
   } else {
     text += ' Mixed — check whether the stalled lifts share a training day.';
   }
 
+  if (preserved === strength.tracked) { tone = TONE.GOOD; text += ' All comparable lifts improved or held steady.'; }
+
   if (strength.stalled?.length) {
-    text += ` Stalled: ${strength.stalled.slice(0, 4).join(', ')}${strength.stalled.length > 4 ? '…' : ''}.`;
+    text += ` Regressed: ${strength.stalled.slice(0, 4).join(', ')}${strength.stalled.length > 4 ? '…' : ''}.`;
   }
 
   // Say so when a lift was left out. A strength verdict computed over four of
@@ -238,6 +247,13 @@ function addStrengthFinding(findings, { strength }) {
 function addVolumeFinding(findings, { volume }) {
   if (!volume || !volume.currentKg) return;
 
+  if (volume.comparable === false) {
+    findings.push({ key: 'volume', label: 'Working volume', tone: TONE.NEUTRAL,
+      value: `${fmt(volume.currentKg, 0)} kg`,
+      detail: volume.previousKg ? `Previous period: ${fmt(volume.previousKg, 0)} kg` : null,
+      text: 'Descriptive total only. Session counts, deloads, exercise mix and machine scales can change it. Use comparable exercise working sets to judge progression.' });
+    return;
+  }
   if (!volume.previousKg) {
     findings.push({
       key: 'volume',
@@ -299,7 +315,9 @@ function addSetTypeFinding(findings, { setTypes }) {
     parts.push(`${setTypes.failureSets} failure set${setTypes.failureSets === 1 ? '' : 's'}`);
   }
 
-  let text = `${parts.join(', ')}. Only the working sets drove progression.`;
+  let text = `${parts.join(', ')}. Progression uses comparable normal-intensity working sets.`;
+  if (setTypes.deloadSessions) text += ` ${setTypes.deloadSessions} actual deload sessions excluded from normal progression.`;
+  if (setTypes.scheduledNormalSessions) text += ` ${setTypes.scheduledNormalSessions} scheduled deloads performed at normal intensity remain eligible for progression.`;
   if (setTypes.unclassifiedSets) {
     text += ` ${setTypes.unclassifiedSets} set${setTypes.unclassifiedSets === 1 ? '' : 's'} `
       + 'from before warm-up tracking remain unclassified and are counted as working sets.';
@@ -387,7 +405,7 @@ function addRecordsFinding(findings, { records }) {
     label: 'Personal records',
     tone: TONE.GOOD,
     value: String(records.records),
-    text: `${records.records} personal record${records.records === 1 ? '' : 's'} set this period.`,
+    text: `${records.records} exercise PR event${records.records === 1 ? '' : 's'} set this period.`,
   });
 }
 
@@ -412,6 +430,8 @@ function addRecoveryFinding(findings, { recovery }) {
       parts.push('persistently high');
     }
   }
+
+  if (recovery.meanEnergy != null) parts.push(`energy ${fmt(recovery.meanEnergy)}/5`);
 
   findings.push({
     key: 'recovery',
@@ -470,6 +490,22 @@ function recommend(findings, input) {
       tone: TONE.BAD,
       text: `Mean sleep is ${fmt(input.recovery.meanSleepHours)} h. The program is explicit that sleep and protein decide whether added weight on the bar sticks. Address this before adding calories or volume.`,
       basedOn: ['recovery'],
+    };
+  }
+
+  if (input.goal === 'recomp' || input.goal === 'mild-cut') {
+    const regressed = input.strength?.regressed ?? 0;
+    const waistDown = input.waist && input.waist.end < input.waist.start;
+    return {
+      action: perWeek === null ? 'Collect a clearer trend' : regressed ? 'Review recovery and working sets' : 'Continue recomp / mild cut',
+      tone: regressed ? TONE.WATCH : TONE.NEUTRAL,
+      text: perWeek === null
+        ? 'Log at least three morning weights in each of two separate weeks, plus consistent waist measurements, before changing intake.'
+        : regressed
+          ? 'Some comparable lifts declined. Check sleep, soreness, effort and repeated working sets before adjusting intake or training. Do not infer a need to bulk from flat weight alone.'
+          : waistDown && input.strength?.tracked ? 'Waist is trending down while comparable strength is holding or improving. Keep the current approach and review again in two weeks.'
+          : 'Aim to preserve repeatable working loads while watching waist and weekly average weight. Stable weight can fit recomp; a falling scale alone does not require a calorie surplus.',
+      basedOn: ['weight', 'waist', 'strength', 'recovery'],
     };
   }
 

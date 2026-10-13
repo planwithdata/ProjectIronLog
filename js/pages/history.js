@@ -218,8 +218,8 @@ function detailView(sessionId) {
       }),
       stat({
         label: 'Duration',
-        value: session.durationSeconds ? formatDuration(session.durationSeconds) : null,
-        foot: session.durationSeconds ? null : 'Not recorded',
+        value: sessionService.getDurationSeconds(session) ? formatDuration(sessionService.getDurationSeconds(session)) : null,
+        foot: sessionService.getDurationSeconds(session) ? null : 'Not recorded or unreliable',
       }),
     ]),
 

@@ -142,13 +142,13 @@ test('rising body fat is only flagged past the scale noise floor', () => {
   assert.equal(real.findings.find((f) => f.key === 'bodyFat').tone, TONE.WATCH);
 });
 
-test('widespread stalling is called a recovery or calorie problem', () => {
+test('widespread stalling asks for comparable sets and recovery context', () => {
   const review = buildReview(healthy({
     strength: { improved: 1, held: 4, regressed: 5, tracked: 10, advancing: [], stalled: ['A', 'B'] },
   }));
   const strength = review.findings.find((finding) => finding.key === 'strength');
   assert.equal(strength.tone, TONE.BAD);
-  assert.match(strength.text, /recovery or calories/);
+  assert.match(strength.text, /comparable sets, recovery/);
 });
 
 /* --- Absent data -------------------------------------------------------- */
@@ -225,4 +225,19 @@ test('every finding carries the figure it was judged on', () => {
     assert.ok(finding.text, `${finding.key} needs explanatory text`);
     assert.ok(Object.values(TONE).includes(finding.tone), `${finding.key} needs a valid tone`);
   }
+});
+
+
+test('recomp accepts stable weight and preserved strength without recommending a bulk', () => {
+  const review = buildReview(healthy({ goal: 'recomp', weight: { startAvg: 76, endAvg: 76, perWeek: 0 }, strength: { tracked: 2, improved: 0, held: 2, regressed: 0 }, waist: { start: 85, end: 84 } }));
+  assert.equal(review.recommendation.action, 'Continue recomp / mild cut');
+  assert.equal(review.findings.find((item) => item.key === 'strength').tone, TONE.GOOD);
+  assert.ok(review.findings.some((item) => item.key === 'waist'));
+});
+
+test('unmatched volume totals are descriptive, not a regression verdict', () => {
+  const review = buildReview(healthy({ volume: { currentKg: 1000, previousKg: 30000, comparable: false } }));
+  const finding = review.findings.find((item) => item.key === 'volume');
+  assert.equal(finding.tone, TONE.NEUTRAL);
+  assert.doesNotMatch(finding.value, /%/);
 });

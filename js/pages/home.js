@@ -465,9 +465,7 @@ function bodyStats() {
 
 function leanBulkVerdict(rate) {
   const perWeek = `${trimNumber(rate.kgPerWeek, 2)} kg/week`;
-  if (rate.verdict === 'slow') return `Gaining ${perWeek} — slower than a lean bulk needs.`;
-  if (rate.verdict === 'fast') return `Gaining ${perWeek} — fast for a lean bulk.`;
-  return `Gaining ${perWeek} — on pace for a lean bulk.`;
+  return `Weight trend: ${perWeek}. For recomp / a mild cut, compare waist and working-set strength too.`;
 }
 
 /* --- Latest PR --------------------------------------------------------- */
