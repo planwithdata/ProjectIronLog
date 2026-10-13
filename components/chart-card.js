@@ -209,10 +209,10 @@ function headlineBlock({ value, unit = '', delta = null, deltaSuffix = '', inver
  */
 function buildTable(series, { formatValue, formatLabel, valueHeader }) {
   // Union of every series' dates, newest first — most recent is what gets read.
-  const dates = [...new Set(series.flatMap((entry) => entry.points.map((p) => p.date)))]
+  const dates = [...new Set(series.flatMap((entry) => entry.points.map((p) => (p.key ?? p.date))))]
     .sort((a, b) => b.localeCompare(a));
 
-  const lookup = series.map((entry) => new Map(entry.points.map((p) => [p.date, p.value])));
+  const lookup = series.map((entry) => new Map(entry.points.map((p) => [p.key ?? p.date, p.value])));
 
   return el('div.chart-table', {}, [
     el('table', {}, [
@@ -245,10 +245,11 @@ function buildTable(series, { formatValue, formatLabel, valueHeader }) {
 
 function buildConfig({ type, series, yBounds, formatValue, formatLabel, reference, theme }) {
   // A shared, sorted label axis so multiple series line up.
-  const labels = [...new Set(series.flatMap((entry) => entry.points.map((p) => p.date)))].sort();
+  const labels = [...new Set(series.flatMap((entry) => entry.points.map((p) => (p.key ?? p.date))))].sort();
 
   const datasets = series.map((entry) => {
-    const lookup = new Map(entry.points.map((p) => [p.date, p.value]));
+    const lookup = new Map(entry.points.map((p) => [p.key ?? p.date, p.value]));
+    const details = new Map(entry.points.map((p) => [p.key ?? p.date, p]));
     const data = labels.map((date) => (lookup.has(date) ? lookup.get(date) : null));
 
     if (type === 'bar') {
@@ -276,7 +277,8 @@ function buildConfig({ type, series, yBounds, formatValue, formatLabel, referenc
       borderDash: entry.dashed ? [4, 4] : undefined,
       pointRadius: entry.pointsOnly ? 3.5 : (entry.showPoints ? 2.5 : 0),
       pointHoverRadius: 5,
-      pointBackgroundColor: entry.color,
+      pointBackgroundColor: (ctx) => details.get(labels[ctx.dataIndex])?.excluded ? theme.warning : entry.color,
+      segment: { borderColor: (ctx) => details.get(labels[ctx.p1DataIndex])?.breakBefore ? 'transparent' : entry.color },
       spanGaps: entry.breakGaps !== true,
       tension: 0.25,
       fill: false,

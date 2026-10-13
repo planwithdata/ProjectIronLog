@@ -140,8 +140,8 @@ function track(card) {
 /* --- Filter row --------------------------------------------------------- */
 
 function filterRow() {
-  const exercises = analytics.exercisesWithHistory();
-  if (!exerciseId && exercises.length) exerciseId = exercises[0].exercise.id;
+  const exercises = analytics.progressionExercises().map((exercise) => ({ exercise, sessions: sessionService.getExerciseHistory(exercise.id, Infinity).length }));
+  if (!exercises.some((item) => item.exercise.id === exerciseId)) exerciseId = exercises.find((item) => item.sessions)?.exercise.id ?? exercises[0]?.exercise.id;
 
   const rangeGroup = el('div.segmented', { role: 'radiogroup', 'aria-label': 'Date range' });
   const buttons = RANGES.map((range) =>
@@ -168,7 +168,7 @@ function filterRow() {
     ? el('select.input.chart-filter__select', {
         'aria-label': 'Exercise for the strength chart',
         on: {
-          change: (event) => { exerciseId = event.target.value; rerender(); },
+          change: (event) => { exerciseId = event.target.value; rerender(); document.querySelector('#progress-strength')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
         },
       }, exercises.map(({ exercise, sessions }) =>
         el('option', {
@@ -699,114 +699,24 @@ function verdictLabel(verdict) {
 
 function strengthSection({ days, endKey, units }) {
   if (!exerciseId) return null;
-
-  const data = analytics.strengthSeries(exerciseId, days, endKey);
-  const insight = data.insight;
-
-  if (!data.e1rm.length) {
-    return el('section', { id: 'progress-strength' }, [
-      sectionHead('Strength'),
-      el('div.card.card--quiet', {}, [
-        emptyState({
-          iconName: 'chart',
-          title: 'No loaded sets in this range',
-          text: 'Widen the range, or pick another exercise.',
-        }),
-      ]),
-    ]);
-  }
-
-  const toDisplay = (points) =>
-    points.map((point) => ({ date: point.date, value: displayWeight(point.value, units) }));
-
-  // Three series, and the middle one is the addition that matters. **Working
-  // load** is what was actually repeated across the sets and what the next
-  // session is built on; **top set** is the heaviest single thing lifted. They
-  // were the same number until a probe was logged among the working sets, and
-  // on the flat dumbbell bench they now differ by 17 kg. Drawing only the top
-  // set is what made a one-off 72 kg set look like the new normal.
-  const series = [
-    { label: 'Est. 1RM (working sets)', points: toDisplay(data.e1rm) },
-    { label: 'Working load', points: toDisplay(data.workingLoad), breakGaps: true },
-    data.workingLoadPrior.length
-      ? {
-        label: 'Earlier, another scale',
-        points: toDisplay(data.workingLoadPrior),
-        color: 'var(--c-text-3)',
-        // Marks, no line. These readings happened, and they do not form a
-        // trend with each other or with the current ones — a line between two
-        // machines' numbers is a picture of a change that never occurred.
-        pointsOnly: true,
-      }
-      : null,
-    { label: 'Top set', points: toDisplay(data.topSet), dashed: true, showPoints: true },
-  ].filter(Boolean);
-
-  const bounds = analytics.niceBounds(
-    series.flatMap((entry) => entry.points),
-    { minSpan: units === 'lb' ? 10 : 5 }
-  );
-
-  const card = chartCard({
-    title: data.exercise?.name ?? 'Strength',
-    subtitle: 'Estimated 1RM as the mean across the sets at the working load, '
-      + 'with the load itself and the heaviest single set',
-    headline: insight && !insight.maintained && insight.e1rm.to !== null
-      ? {
-          value: trimNumber(displayWeight(insight.e1rm.to, units), 1),
-          unit: units,
-          delta: insight.e1rm.delta === null
-            ? null
-            : Number(displayWeight(insight.e1rm.delta, units).toFixed(1)),
-          deltaSuffix: `over ${pluralize(insight.comparableSessions, 'session')}`,
-        }
-      : null,
-    type: 'line',
-    height: 200,
-    yBounds: bounds,
-    series,
-    formatValue: (value) => trimNumber(value, 1),
-    formatLabel: (key) => formatDate(key),
-    valueHeader: `Load (${units})`,
-    emptyText: 'Log this exercise to see it here.',
-  });
-
+  const data = analytics.exerciseProgression(exerciseId, days, endKey);
   return el('section', { id: 'progress-strength' }, [
-    sectionHead('Strength', {
-      hint: insight
-        ? (insight.comparableSessions === insight.sessions
-          ? pluralize(insight.sessions, 'session')
-          : `${insight.comparableSessions} of ${insight.sessions} comparable`)
-        : pluralize(data.e1rm.length, 'session'),
-    }),
-    track(card),
-
-    // Every caveat the reading carries, stated where the chart is rather than
-    // in a footnote nobody reads. A break in the line is meaningless without
-    // the sentence that says what broke it.
-    data.breaks.length
-      ? el('div.card.card--quiet', { style: { marginTop: 'var(--s-2)' } },
-          data.breaks.map((point) => el('div.row', {
-            style: { gap: 'var(--s-2)', alignItems: 'flex-start', marginBottom: 'var(--s-2)' },
-          }, [
-            icon('warning', { size: 14 }),
-            el('div', { style: { minWidth: 0 } }, [
-              el('div.t-caption.t-semibold', { text: formatDate(point.date) }),
-              el('div.t-caption.t-dim', { text: point.note ?? '' }),
-            ]),
-          ])))
-      : null,
-
-    insight ? insightDetail(insight, units) : null,
-
-    el('p.t-caption.t-faint', {
-      text: 'Estimated 1RM is the series to watch — it registers progress made by adding reps, '
-        + 'which is most of what double progression produces between load increases. It is a '
-        + 'mean across the sets performed at the working load, so one strong first set cannot '
-        + 'stand in for a session that got worse everywhere else.',
-      style: { marginTop: 'var(--s-2)', padding: '0 var(--s-1)' },
-    }),
-  ].filter(Boolean));
+    sectionHead(data.exercise?.name ?? 'Exercise progression', { hint: pluralize(data.sessions, 'session') }),
+    el('p.t-caption.t-dim', { text: data.note, style: { marginBottom: 'var(--s-3)' } }),
+    !data.sessions ? emptyState({ iconName: 'chart', title: 'No completed working sets in this range', text: 'Widen the date range, or select another exercise.' })
+      : el('div.grid', { style: { gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))' } }, data.charts.map((metric) => {
+        const unit = metric.unit === 'kg' ? units : metric.unit;
+        return track(chartCard({ title: metric.label, subtitle: unit,
+          series: [{ label: metric.label, showPoints: true, breakGaps: true,
+            points: metric.points.map((point) => ({ ...point, value: point.value == null ? null : metric.unit === 'kg' ? displayWeight(point.value, units) : point.value })) }],
+          height: 170,
+          formatValue: (value) => `${trimNumber(value, 1)} ${unit}`,
+          formatLabel: (key) => formatDate(key.split('|')[0]),
+          valueHeader: unit,
+        }));
+      })),
+    data.sessions ? insightDetail(analytics.getInsight(exerciseId), units) : null,
+  ]);
 }
 
 /**

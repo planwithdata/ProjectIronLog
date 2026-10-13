@@ -704,3 +704,29 @@ test('bundled JSON seeds an empty app, preserves newer records, and recovers mis
   assert.equal(await restoreBundledBackup({ onlyIfEmpty: true }), null);
   assert.equal(sessionService.getSessions().length, 0);
 });
+
+
+test('exercise charts break across scale changes and exclude future history', async () => {
+  await freshDb();
+  await logSession('tuesday-chest', '2026-08-11', { 'rope-triceps-pushdown': { weightKg: 10, reps: [12, 12, 12], context: { machineId: 'a', label: 'A' } } });
+  await logSession('tuesday-chest', '2026-08-18', { 'rope-triceps-pushdown': { weightKg: 50, reps: [12, 12, 12], context: { machineId: 'b', label: 'B' } } });
+  const chart = analytics.exerciseProgression('rope-triceps-pushdown', null, '2026-08-18');
+  assert.equal(chart.sessions, 2);
+  assert.ok(chart.charts.every((metric) => metric.points[1].breakBefore));
+  assert.equal(analytics.exerciseProgression('rope-triceps-pushdown', null, '2026-08-11').sessions, 1);
+});
+
+test('exercise charts retain bodyweight reps, same-day sessions, and deload markers', async () => {
+  await freshDb();
+  const first = await logSession('tuesday-chest', '2026-08-11', { 'flat-dumbbell-bench-press': { weightKg: 0, reps: [8, 7, 6] } });
+  await logSession('tuesday-chest', '2026-08-11', { 'flat-dumbbell-bench-press': { weightKg: 0, reps: [9, 8, 7] } });
+  await sessionService.setSessionIntensity(first, true);
+  const data = analytics.exerciseProgression('flat-dumbbell-bench-press', 14, '2026-08-18');
+  assert.equal(data.sessions, 2);
+  assert.equal(data.charts.some((metric) => metric.key === 'e1rm'), false);
+  const reps = data.charts.find((metric) => metric.key === 'reps').points;
+  assert.deepEqual(reps.map((p) => p.value).sort(), [7, 8]);
+  assert.equal(new Set(reps.map((p) => p.key)).size, 2);
+  assert.equal(reps.filter((p) => p.excluded).length, 1);
+  assert.equal(analytics.exerciseProgression('flat-dumbbell-bench-press', 1, '2026-08-18').sessions, 0);
+});

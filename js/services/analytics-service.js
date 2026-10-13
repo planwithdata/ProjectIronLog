@@ -548,3 +548,41 @@ export function overview(days = 90, endKey = today()) {
     streakWeeks: sessionService.getWeeklyStreak(endKey),
   };
 }
+
+/** Shared chart data for Progress and PDF; never includes history after the report end. */
+export function exerciseProgression(exerciseId, days = 90, endKey = today()) {
+  const exercise = programService.getExercise(exerciseId);
+  const history = sessionService.getExerciseHistory(exerciseId, Infinity)
+    .filter((item) => item.date <= endKey && !item.substituted);
+  const insight = exercise ? exerciseInsight(exercise, history) : null;
+  const points = withinDays(insight?.series ?? [], days, endKey);
+  const timed = exercise?.reps?.unit === 'seconds' || /sec|second/i.test(exercise?.reps?.label ?? '');
+  const specs = [
+    { key: 'load', label: 'Repeatable working load', unit: 'kg', read: (p) => p.workingLoadKg },
+    { key: 'reps', label: timed ? 'Mean hold at working load' : 'Mean reps at working load', unit: timed ? 'sec' : 'reps', read: (p) => p.setsAtLoad ? p.repsAtLoad / p.setsAtLoad : null },
+    { key: 'sets', label: 'Sets at working load', unit: 'sets', read: (p) => p.setsAtLoad },
+    ...(!timed && points.some((p) => p.e1rmKg > 0) ? [{ key: 'e1rm', label: 'Working-set estimated 1RM', unit: 'kg', read: (p) => p.e1rmKg || null }] : []),
+  ];
+  const charts = specs.map(({ read, ...spec }) => ({ ...spec,
+    points: points.map((p, index) => {
+      const prior = points[index - 1];
+      const excluded = p.isDeload || p.painLimited || p.incomplete;
+      const priorExcluded = prior && (prior.isDeload || prior.painLimited || prior.incomplete);
+      return { date: p.date, key: `${p.date}|${String(index).padStart(5, '0')}`,
+        value: read(p), excluded: Boolean(excluded),
+        breakBefore: index === 0 || p.comparable === false || Boolean(excluded || priorExcluded)
+          || (spec.key === 'reps' && prior?.workingLoadKg !== p.workingLoadKg),
+      };
+    }),
+  }));
+  return { exercise, charts, sessions: points.length,
+    note: 'Dots show logged work. Orange dots are deload, pain-limited or incomplete sessions, not progression evidence. Lines break at comparison changes; rep lines also break when load changes. Warm-ups and intensity sets are excluded. Zero load means no added weight.',
+  };
+}
+
+export function progressionExercises() {
+  return [...programService.getAllExercises(), ...programService.getRetiredExercises(), ...programService.getSubstituteExercises()]
+    .filter((exercise, index, all) => all.findIndex((item) => item.id === exercise.id) === index)
+    .filter((exercise) => !programService.isWarmupOnly(exercise))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
