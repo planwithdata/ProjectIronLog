@@ -8,12 +8,13 @@
  */
 
 import { el, icon, replace } from '../core/dom.js';
-import { refresh } from '../core/router.js';
+import { go, refresh } from '../core/router.js';
 import { toast } from '../core/events.js';
 import { formatDate, relativeDay } from '../core/format.js';
 
 import { download, stampedName, formatBytes } from '../core/download.js';
 import * as db from '../services/db.js';
+import { restoreBundledBackup, BUNDLED_BACKUP_URL } from '../services/backup-service.js';
 import * as settingsService from '../services/settings-service.js';
 import { THEMES, UNITS } from '../services/settings-service.js';
 import * as trainingPrefs from '../services/training-prefs-service.js';
@@ -433,6 +434,14 @@ function dataSection() {
         handleBackup
       ),
       actionRow('upload', 'Restore from JSON', 'Replaces all current data', () => fileInput.click()),
+      actionRow('upload', 'Recover bundled October 12 backup',
+        'Add missing history; keep existing workouts and edits', handleBundledRecovery),
+      el('a.list__row.list__row--tappable', {
+        href: BUNDLED_BACKUP_URL.href, download: 'ironlog-backup-2026-10-12.json',
+        text: 'Download bundled October 12 JSON backup',
+      }),
+      actionRow('calendar', 'Workout history',
+        `${db.read(db.COLLECTIONS.SESSIONS).length} total saved workouts`, () => go('history')),
       el('div.list__row', {}, [
         el('div.list__icon', {}, [icon('info')]),
         el('div.list__body', {}, [
@@ -554,11 +563,38 @@ async function handleRestore(input) {
   try {
     const payload = JSON.parse(await file.text());
     await db.importAll(payload);
-    toast('Backup restored', 'success');
-    refresh();
+    const restored = db.read(db.COLLECTIONS.SESSIONS);
+    const completed = restored.filter((session) => session.status === 'completed').length;
+    const unfinished = restored.filter((session) => session.status === 'in-progress').length;
+    const weights = db.read(db.COLLECTIONS.BODY_WEIGHT).length;
+    const action = await openSheet({
+      title: 'Backup restored',
+      text: `${restored.length} workouts restored: ${completed} completed and ${unfinished} in progress. ${weights} weigh-ins restored.`
+        + (unfinished ? ' The Workout screen resumes the unfinished workout. All completed workouts are available in History.' : ''),
+      actions: [
+        { label: 'View workout history', value: 'history', tone: 'primary' },
+        { label: 'Done', value: null },
+      ],
+    });
+    if (action === 'history') go('history');
+    else refresh();
   } catch (error) {
     console.error('[settings] restore failed:', error);
     toast(error.message || 'That file could not be restored', 'danger');
+  }
+}
+
+async function handleBundledRecovery() {
+  try {
+    const result = await restoreBundledBackup();
+    settingsService.applyTheme();
+    await openSheet({ title: 'History recovered',
+      text: `${result.added} missing workouts added. ${result.total} workouts saved in total. Existing records were kept.`,
+      actions: [{ label: 'View history', value: true, tone: 'primary' }],
+    });
+    go('history');
+  } catch (error) {
+    toast(error.message || 'Recovery failed', 'danger');
   }
 }
 
@@ -570,6 +606,8 @@ async function handleReset() {
 
   try {
     await db.reset();
+    // An intentional reset stays empty on the next launch.
+    await db.update(db.COLLECTIONS.META, (meta) => ({ ...meta, bundledRecoveryDismissed: true }));
     settingsService.applyTheme();
     toast('App reset', 'success');
     refresh();

@@ -23,7 +23,7 @@
  * service worker runs outside the module graph and cannot import it.
  */
 
-const CACHE_VERSION = 'v1.9.1';
+const CACHE_VERSION = 'v1.9.3';
 const CACHE_NAME = `ironlog-${CACHE_VERSION}`;
 
 /**
@@ -68,6 +68,7 @@ const PRECACHE = [
   './js/engine/review.js',
   './js/services/storage-adapter.js',
   './js/services/db.js',
+  './js/services/backup-service.js',
   './js/services/program-service.js',
   './js/services/settings-service.js',
   './js/services/training-prefs-service.js',
@@ -113,6 +114,7 @@ const PRECACHE = [
   './assets/vendor/jspdf.umd.min.js',
 
   './data/workouts.json',
+  './data/recovery-backup.json',
 
   './icons/icon.svg',
   './icons/icon-192.png',

@@ -15,6 +15,7 @@ import { el, icon, $ } from './core/dom.js';
 import * as router from './core/router.js';
 import { EVENTS, on } from './core/events.js';
 import * as db from './services/db.js';
+import { restoreBundledBackup } from './services/backup-service.js';
 import * as settingsService from './services/settings-service.js';
 import * as programService from './services/program-service.js';
 import { nav } from '../components/nav.js';
@@ -47,6 +48,12 @@ async function boot() {
 
   try {
     await db.init();
+    try {
+      await restoreBundledBackup({ onlyIfEmpty: true });
+    } catch (error) {
+      // A missing network/cache must not prevent the app from opening.
+      console.warn('[backup] automatic recovery unavailable:', error);
+    }
     settingsService.applyTheme();
     settingsService.watchSystemTheme();
 

@@ -219,14 +219,14 @@ function dayHeader(day, wave, session) {
     ]),
     // History is a sub-view of Workout rather than a sixth tab: a bottom bar
     // stops being tappable much past five items.
-    !session && sessionService.getCompletedSessions().length
+    sessionService.getCompletedSessions().length
       ? el('button.btn.btn--ghost.btn--sm', {
           type: 'button',
           style: { paddingLeft: '0', marginTop: 'var(--s-2)' },
           on: { click: () => go('history') },
         }, [
           icon('calendar', { className: 'btn__icon' }),
-          el('span', { text: 'Workout history' }),
+          el('span', { text: `Workout history (${sessionService.getCompletedSessions().length})` }),
         ])
       : null,
   ]);

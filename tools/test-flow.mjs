@@ -27,7 +27,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -46,6 +46,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input) => {
   const href = String(input?.href ?? input);
+  if (href.includes('recovery-backup.json')) {
+    return new Response(readFileSync(join(ROOT, 'data', 'recovery-backup.json'), 'utf8'));
+  }
   if (href.includes('workouts.json')) {
     const body = readFileSync(join(ROOT, 'data', 'workouts.json'), 'utf8');
     return new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
@@ -658,4 +661,46 @@ test('editing an old workout preserves completion time and duration', async () =
   const edited = await sessionService.completeSession(id);
   assert.equal(edited.durationSeconds, 3600);
   assert.equal(edited.completedAt, '2026-08-11T11:00:00Z');
+});
+
+
+test('October 12 backup restores every collection, with 42 completed workouts and one unfinished workout', {
+  skip: !existsSync(join(ROOT, 'ironlog-backup-2026-10-12.json')),
+}, async () => {
+  await freshDb();
+  const backup = JSON.parse(readFileSync(join(ROOT, 'ironlog-backup-2026-10-12.json'), 'utf8'));
+  await db.importAll(structuredClone(backup));
+  assert.equal(sessionService.getSessions().length, 43);
+  assert.equal(sessionService.getCompletedSessions().length, 42);
+  assert.equal(sessionService.getActiveSession().date, '2026-10-12');
+  for (const [collection, records] of Object.entries(backup.data)) {
+    assert.deepEqual(db.read(collection), records, `${collection} is restored unchanged`);
+    assert.deepEqual(await storage.get(collection), records, `${collection} is persisted in full`);
+  }
+  const review = await import('../js/services/review-service.js');
+  assert.equal(review.generate(90, '2026-10-13').sessions.length, 42);
+});
+
+
+test('bundled JSON seeds an empty app, preserves newer records, and recovers missing history idempotently', async () => {
+  const { restoreBundledBackup } = await import('../js/services/backup-service.js');
+  const backup = JSON.parse(readFileSync(join(ROOT, 'data', 'recovery-backup.json'), 'utf8'));
+  await freshDb();
+  const restored = await restoreBundledBackup({ onlyIfEmpty: true });
+  assert.equal(restored.total, 43);
+  for (const [collection, records] of Object.entries(backup.data)) {
+    assert.deepEqual(db.read(collection), records);
+    assert.deepEqual(await storage.get(collection), records);
+  }
+  const edited = { ...backup.data.sessions[0], date: '2026-10-13', notes: 'Keep my newer edit' };
+  await db.write(db.COLLECTIONS.SESSIONS, [edited]);
+  assert.equal(await restoreBundledBackup({ onlyIfEmpty: true }), null);
+  assert.equal(sessionService.getSessions().length, 1);
+  assert.equal((await restoreBundledBackup()).added, 42);
+  assert.deepEqual(sessionService.getSessionById(edited.id), edited);
+  assert.equal((await restoreBundledBackup()).added, 0);
+  await db.reset();
+  await db.update(db.COLLECTIONS.META, (meta) => ({ ...meta, bundledRecoveryDismissed: true }));
+  assert.equal(await restoreBundledBackup({ onlyIfEmpty: true }), null);
+  assert.equal(sessionService.getSessions().length, 0);
 });
