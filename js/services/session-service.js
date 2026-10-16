@@ -344,6 +344,8 @@ export async function startSession(dayId, dayKey = today()) {
     week: wave.week,
     waveWeek: wave.waveWeek,
     isDeload: wave.isDeload,
+    plannedDeload: wave.isDeload,
+    actualDeload: null,
     scheduledDeload: wave.scheduledDeload,
     schedule,
     entries: day.exercises
@@ -1405,6 +1407,14 @@ export async function setSessionIntensity(sessionId, isDeload) {
   const session = getSessionById(sessionId);
   if (!session) throw new Error('That session no longer exists.');
   return db.replaceById(COLLECTIONS.SESSIONS, sessionId, {
+    originalIsDeload: session.originalIsDeload ?? session.isDeload,
+    originalIntensityMetadata: session.originalIntensityMetadata ?? {
+      isDeload: session.isDeload, plannedDeload: session.plannedDeload,
+      scheduledDeload: session.scheduledDeload, actualDeload: session.actualDeload,
+      updatedAt: session.updatedAt,
+    },
+    plannedDeload: session.plannedDeload ?? session.isDeload,
+    actualDeload: isDeload,
     isDeload, scheduledDeload: session.scheduledDeload ?? session.isDeload,
   });
 }
@@ -1413,4 +1423,34 @@ export async function setSessionIntensity(sessionId, isDeload) {
 export function getDurationSeconds(session) {
   const value = session?.durationSeconds;
   return Number.isFinite(value) && value > 0 && value <= 6 * 3600 ? value : null;
+}
+
+/** Explicitly reviewed corrections only; never run on import or startup. */
+export function getOctoberDeloadCorrections() {
+  return getCompletedSessions().flatMap((session) => {
+    if (session.date >= '2026-10-10' && session.date <= '2026-10-12') return [{ session, isDeload: false }];
+    if ((session.date === '2026-10-13' && session.dayId === 'tuesday-chest')
+      || (session.date === '2026-10-15' && session.dayId === 'wednesday-back-biceps')) return [{ session, isDeload: true }];
+    return [];
+  });
+}
+
+/** Refresh only a pristine open workout. Never replace performed work. */
+export async function refreshUnloggedPrescription(sessionId) {
+  const session = getSessionById(sessionId);
+  if (!session || session.status !== 'in-progress' || session.editingCompletedAt
+    || getSessionCompletion(session).done > 0) throw new Error('Logged workouts keep their original prescription.');
+  const wave = programService.getTrainingWeek(session.date);
+  return db.replaceById(COLLECTIONS.SESSIONS, sessionId, {
+    plannedDeload: wave.isDeload, isDeload: wave.isDeload, actualDeload: null,
+    entries: session.entries.map((entry) => {
+      const exercise = programService.getExercise(entry.substitution?.performedId ?? entry.exerciseId);
+      if (!exercise || programService.isWarmupOnly(exercise)) return entry;
+      const plan = getRecommendation(exercise, session.date, { context: entry.context });
+      return { ...entry, targetWeightKg: plan.weightKg, targetReps: plan.perSetReps,
+        plannedAction: plan.action, planReason: plan.reason,
+        sets: plan.perSetReps.map((reps, index) => ({ weightKg: plan.perSetWeights?.[index] ?? plan.weightKg,
+          reps, completed: false, rpe: null, kind: SET_KIND.WORKING })) };
+    }),
+  });
 }

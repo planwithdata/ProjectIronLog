@@ -171,12 +171,31 @@ export async function changeSchedule(dayId, scheduledDate, targetDate = null, st
 }
 
 /** Optional dated overrides travel with the existing profile backup. */
-export async function setDeloadPlan(action, dayKey = today()) {
+export function getDeloadPeriod(dayKey = today()) {
+  return [...(db.read(COLLECTIONS.PROFILE).deloadOverrides ?? [])].reverse()
+    .find((item) => dayKey >= item.start && dayKey <= item.end) ?? null;
+}
+
+export async function setDeloadPlan(action, dayKey = today(), endDate = addDays(dayKey, 6)) {
+  const valid = (date) => /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date))
+    && new Date(date).toISOString().slice(0, 10) === date;
+  if (!valid(dayKey) || !valid(endDate) || endDate < dayKey) throw new Error('Choose a valid deload period.');
+  const active = getDeloadPeriod(dayKey);
   const wave = getTrainingWeek(dayKey);
-  const end = addDays(dayKey, 6);
-  const ranges = action === 'start' ? [{ start: dayKey, end, isDeload: true }]
-    : action === 'postpone' ? [{ start: dayKey, end, isDeload: false }, { start: addDays(dayKey, 7), end: addDays(dayKey, 13), isDeload: true }]
-    : [{ start: dayKey, end: addDays(dayKey, 6 - (wave.dayCount % 7)), isDeload: false }];
+  const weekEnd = addDays(dayKey, 6 - (wave.dayCount % 7));
+  const stopEnd = [endDate, weekEnd, active?.end ?? dayKey].sort().at(-1);
+  let ranges;
+  if (action === 'start') ranges = [{ start: dayKey, end: endDate, isDeload: true }];
+  else if (action === 'extend') {
+    if (!wave.isDeload) throw new Error('Start a deload before extending it.');
+    const end = active?.isDeload ? active.end : weekEnd;
+    ranges = [{ start: active?.isDeload ? active.start : dayKey, end: addDays(end, 7), isDeload: true }];
+  } else if (action === 'postpone') ranges = [
+    { start: dayKey, end: stopEnd, isDeload: false },
+    { start: addDays(dayKey, 7), end: addDays(dayKey, 13), isDeload: true },
+  ];
+  else if (action === 'end' || action === 'skip') ranges = [{ start: dayKey, end: stopEnd, isDeload: false }];
+  else throw new Error('Unknown deload action.');
   return db.update(COLLECTIONS.PROFILE, (profile) => ({ ...profile,
     deloadOverrides: [...(profile.deloadOverrides ?? []), ...ranges],
   }));
@@ -553,12 +572,12 @@ export function getTrainingDaysFrom(dayKey = today()) {
 
 /**
  * Deload adjustment for a prescribed set count: roughly 40% fewer sets,
- * never below two (the program's own worked example is 4 -> 2, 3 -> 2).
+ * never below one (4 -> 2, 3 -> 2, 2 -> 1).
  */
 export function deloadSets(sets) {
   const wave = getProgram().program?.wave?.deload;
   const reduction = (wave?.setReductionPercent ?? 40) / 100;
-  return Math.max(2, Math.round(sets * (1 - reduction)));
+  return Math.max(1, Math.min(sets, Math.round(sets * (1 - reduction))));
 }
 
 /** Countdown to the next two-week review. */

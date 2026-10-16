@@ -730,3 +730,92 @@ test('exercise charts retain bodyweight reps, same-day sessions, and deload mark
   assert.equal(reps.filter((p) => p.excluded).length, 1);
   assert.equal(analytics.exerciseProgression('flat-dumbbell-bench-press', 1, '2026-08-18').sessions, 0);
 });
+
+
+test('October recovery spans the wave reset, moved Legs and a v4 restart', async () => {
+  await freshDb('2026-09-10');
+  assert.equal(programService.getTrainingWeek('2026-10-15').waveWeek, 1);
+  await programService.setDeloadPlan('start', '2026-10-13', '2026-10-19');
+  await programService.changeSchedule('thursday-legs', '2026-10-15', '2026-10-16');
+  for (const date of ['2026-10-13', '2026-10-15', '2026-10-16', '2026-10-19']) {
+    assert.equal(programService.getTrainingWeek(date).isDeload, true);
+  }
+  assert.equal(programService.getTrainingWeek('2026-10-20').isDeload, false);
+  const backup = structuredClone(db.exportAll());
+  assert.equal(backup.schemaVersion, 4);
+  await db.reset();
+  await db.importAll(backup);
+  await db.init();
+  const session = await sessionService.startSession('thursday-legs', '2026-10-16');
+  assert.equal(session.plannedDeload, true);
+  assert.equal(session.waveWeek, 1);
+  assert.equal(session.schedule.scheduledDate, '2026-10-15');
+  for (const entry of session.entries) {
+    const exercise = programService.getExercise(entry.exerciseId);
+    if (programService.isWarmupOnly(exercise)) continue;
+    assert.equal(entry.sets.length, programService.deloadSets(exercise.sets));
+    assert.match(entry.planReason, /3?4 reps in reserve/);
+  }
+  await programService.setDeloadPlan('extend', '2026-10-16');
+  assert.equal(programService.getTrainingWeek('2026-10-26').isDeload, true);
+  await programService.setDeloadPlan('end', '2026-10-17');
+  assert.equal(programService.getTrainingWeek('2026-10-17').isDeload, false);
+  assert.equal(programService.getTrainingWeek('2026-10-26').isDeload, false);
+  await assert.rejects(programService.setDeloadPlan('start', '2026-02-30'));
+  await assert.rejects(programService.setDeloadPlan('oops'));
+});
+
+test('reviewed October classifications retain results and recover the normal baseline', async () => {
+  await freshDb('2026-09-10');
+  const normal = await logSession('tuesday-chest', '2026-10-10', {
+    'flat-dumbbell-bench-press': { weightKg: 40, reps: [7, 7, 7] },
+  });
+  const reduced = await logSession('tuesday-chest', '2026-10-13', {
+    'flat-dumbbell-bench-press': { weightKg: 26, reps: [6, 6] },
+  });
+  const before = structuredClone(sessionService.getSessions());
+  assert.equal(sessionService.getSessionById(normal).isDeload, true);
+  await programService.setDeloadPlan('start', '2026-10-13', '2026-10-19');
+  assert.deepEqual(sessionService.getSessions(), before, 'planning alone never classifies history');
+  for (const item of sessionService.getOctoberDeloadCorrections()) {
+    await sessionService.setSessionIntensity(item.session.id, item.isDeload);
+  }
+  for (const original of before) {
+    const updated = sessionService.getSessionById(original.id);
+    for (const key of Object.keys(original)) {
+      if (['isDeload', 'actualDeload', 'updatedAt'].includes(key)) continue;
+      assert.deepEqual(updated[key], original[key], key);
+    }
+    assert.equal(updated.originalIsDeload, original.isDeload);
+  }
+  assert.equal(sessionService.getSessionById(normal).actualDeload, false);
+  assert.equal(sessionService.getSessionById(reduced).actualDeload, true);
+  assert.ok(offered('flat-dumbbell-bench-press', '2026-10-16').weightKg <= 28);
+  assert.equal(offered('flat-dumbbell-bench-press', '2026-10-20').weightKg, 40);
+  const backup = structuredClone(db.exportAll());
+  await db.reset();
+  await db.importAll(backup);
+  assert.deepEqual(db.exportAll().data.sessions, backup.data.sessions);
+  assert.equal(offered('flat-dumbbell-bench-press', '2026-10-20').weightKg, 40);
+});
+
+test('an unlogged open workout can adopt recovery, but performed sets cannot be replaced', async () => {
+  await freshDb('2026-09-10');
+  await logSession('tuesday-chest', '2026-10-06', {
+    'flat-dumbbell-bench-press': { weightKg: 40, reps: [7, 7, 7] },
+  });
+  const session = await sessionService.startSession('tuesday-chest', '2026-10-16');
+  await programService.setDeloadPlan('start', '2026-10-13', '2026-10-19');
+  await sessionService.refreshUnloggedPrescription(session.id);
+  const entry = sessionService.getSessionById(session.id).entries.find(item => item.exerciseId === 'flat-dumbbell-bench-press');
+  assert.ok(entry.targetWeightKg >= 24 && entry.targetWeightKg <= 28);
+  assert.equal(entry.sets.length, 2);
+  await sessionService.updateSet(session.id, entry.exerciseId, 0, { weightKg: 40, reps: 7, completed: true });
+  const before = structuredClone(sessionService.getSessionById(session.id).entries);
+  await assert.rejects(sessionService.refreshUnloggedPrescription(session.id));
+  await sessionService.setSessionIntensity(session.id, false);
+  await sessionService.completeSession(session.id);
+  assert.deepEqual(sessionService.getSessionById(session.id).entries, before);
+  assert.equal(sessionService.getSessionById(session.id).plannedDeload, true);
+  assert.equal(sessionService.getSessionById(session.id).isDeload, false);
+});

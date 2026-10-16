@@ -147,6 +147,14 @@ export const DELOAD_LOAD_FACTOR = 0.65;
  * }}
  */
 export function recommend(exercise, history = [], options = {}) {
+  const plan = recommendWorking(exercise, history, options);
+  if (!options.isDeload) return plan;
+  return { ...plan, targetRir: '3?4', reason: plan.weightKg === null
+    ? 'Deload: use a comfortable light load or easier variation, with 3?4 reps in reserve. Fewer working sets; avoid failure and intensity work.'
+    : `${plan.reason} Keep 3?4 reps in reserve; avoid failure and intensity work.` };
+}
+
+function recommendWorking(exercise, history = [], options = {}) {
   const range = repRange(exercise);
   const setCount = options.setCount ?? exercise.sets;
   const increment = incrementFor(exercise, options.loadPrefs);

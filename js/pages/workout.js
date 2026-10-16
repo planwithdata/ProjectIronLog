@@ -1591,6 +1591,13 @@ async function handleFinish(sessionId) {
 
   try {
     restTimer.stop();
+    if ((session.plannedDeload ?? session.isDeload) && session.actualDeload == null) {
+      const intensity = await openChoiceSheet({ title: 'How did you perform this workout?',
+        text: 'A planned deload counts as recovery only if you actually reduced the loading and volume.',
+        choices: [{ value: 'deload', label: 'Reduced loading / volume' }, { value: 'normal', label: 'Normal / heavy intensity' }] });
+      if (!intensity) return;
+      await sessionService.setSessionIntensity(sessionId, intensity === 'deload');
+    }
     await sessionService.completeSession(sessionId);
     await showSummary(sessionId);
     refresh();
@@ -1830,13 +1837,12 @@ export const page = {
 };
 
 function planningControls(day, session) {
-  if (day.type !== 'training') return null;
   const button = (text, click) => el('button.btn.btn--ghost.btn--sm', { type: 'button', text, on: { click: async () => {
     try { await click(); } catch (error) { toast(error.message); }
   } } });
   return el('div.row', { style: { flexWrap: 'wrap' } }, [
     !session ? el('p.t-footnote.t-dim', { text: programService.getScheduleChanges().filter((item) => item.dayId === day.id && (item.targetDate >= today() || item.scheduledDate >= today())).map((item) => `${item.scheduledDate}: ${item.status === 'skipped' ? 'skipped' : 'moved to ' + item.targetDate}`).join(' ? ') }) : null,
-    !session ? button('Postpone / reschedule / skip', async () => {
+    !session && day.type === 'training' ? button('Postpone / reschedule / skip', async () => {
       const fit = programService.getScheduleFit(day.id);
       const original = el('input.input', { type: 'date', value: fit.scheduledDate, 'aria-label': 'Original scheduled date' });
       const target = el('input.input', { type: 'date', value: addDays(today(), 1), 'aria-label': 'New workout date' });
@@ -1847,15 +1853,50 @@ function planningControls(day, session) {
       await programService.changeSchedule(day.id, original.value, target.value, action);
       refresh();
     }) : null,
-    button(session ? (session.isDeload ? 'Performed: deload' : 'Performed: normal intensity') : 'Deload controls', async () => {
-      const action = await openChoiceSheet({ title: session ? 'Actual workout intensity' : 'Deload plan',
-        text: session ? 'Classifies this workout for progression and reports. Logged sets and weights stay intact.' : 'Start or postpone a seven-day deload, or skip the current training week. Changes apply to workouts started afterwards.',
-        choices: session ? [{ value: 'normal', label: 'Normal intensity' }, { value: 'deload', label: 'Deload' }]
-          : [{ value: 'start', label: 'Start deload now' }, { value: 'postpone', label: 'Postpone deload one week' }, { value: 'skip', label: 'Skip deload this week' }] });
+    button('Deload controls', async () => {
+      const period = programService.getDeloadPeriod();
+      const action = await openChoiceSheet({ title: 'Deload plan',
+        text: `${period?.isDeload ? `Recovery: ${period.start} through ${period.end}. ` : ''}Dates follow the day you train, including moved workouts. The automatic wave does not end a manual recovery period.`,
+        choices: [
+          { value: 'start', label: 'Start deload / choose dates' },
+          { value: 'postpone', label: 'Postpone one week' },
+          { value: 'extend', label: 'Extend seven days' },
+          { value: 'end', label: 'End deload today' },
+          { value: 'october', label: 'Use October 13?19, 2026 / review history' },
+        ] });
       if (!action) return;
-      if (session) await sessionService.setSessionIntensity(session.id, action === 'deload');
-      else await programService.setDeloadPlan(action);
+      if (action === 'october') {
+        const corrections = sessionService.getOctoberDeloadCorrections();
+        const confirmed = await confirmSheet({ title: 'Confirm October recovery period',
+          text: `Set October 13?19, 2026 as recovery. Based on your reported intensity, classify these existing workouts: ${corrections.map(({ session: item, isDeload }) => `${item.date} ${programService.getDayById(item.dayId)?.label ?? item.dayId}: ${isDeload ? 'actual deload' : 'normal intensity'}`).join('; ') || 'No matching completed workouts found'}. Recorded sets, weights, dates and original flags are preserved.`,
+          confirmLabel: 'Apply period and classifications', cancelLabel: 'Cancel' });
+        if (!confirmed) return;
+        await programService.setDeloadPlan('start', '2026-10-13', '2026-10-19');
+        for (const item of corrections) await sessionService.setSessionIntensity(item.session.id, item.isDeload);
+      } else if (action === 'start') {
+        const start = el('input.input', { type: 'date', value: today(), 'aria-label': 'Deload start' });
+        const end = el('input.input', { type: 'date', value: addDays(today(), 6), 'aria-label': 'Deload end' });
+        const confirmed = await openSheet({ title: 'Recovery dates (inclusive)', text: 'Changes prescriptions for new workouts. Historical classifications are unchanged.',
+          body: [el('label', { text: 'Start' }), start, el('label', { text: 'End' }), end],
+          actions: [{ label: 'Start deload', value: true, tone: 'primary' }, { label: 'Cancel', value: null }] });
+        if (!confirmed) return;
+        await programService.setDeloadPlan('start', start.value, end.value);
+      } else await programService.setDeloadPlan(action);
+      const active = sessionService.getActiveSession();
+      if (active && !active.editingCompletedAt && active.date === today()) {
+        if (sessionService.getSessionCompletion(active).done === 0) {
+          await sessionService.refreshUnloggedPrescription(active.id);
+        } else toast('Plan saved. Logged workout prescriptions stay intact; confirm actual intensity when finishing.');
+      }
       refresh();
     }),
+    session ? button(session.actualDeload == null ? 'Confirm actual intensity' : (session.isDeload ? 'Performed: deload' : 'Performed: normal intensity'), async () => {
+      const action = await openChoiceSheet({ title: 'Actual workout intensity',
+        text: 'Confirm how this workout was performed. Changes its classification for progression and reports; recorded sets, weights and original metadata are preserved.',
+        choices: [{ value: 'normal', label: 'Normal / heavy intensity' }, { value: 'deload', label: 'Reduced load / volume (deload)' }] });
+      if (!action) return;
+      await sessionService.setSessionIntensity(session.id, action === 'deload');
+      refresh();
+    }) : null,
   ].filter(Boolean));
 }
